@@ -8,16 +8,18 @@ and converts its 6-class ICCMS annotation into our 3-class collapse
 Dataset
 -------
 - Source: https://universe.roboflow.com/renielaz/dental-caries-x-ray
-- Size: 586 bitewing radiographs, CC-BY 4.0
+- Size: ~586 source bitewings, expanded to 1483 images at the version
+  used by v0 (Roboflow's preprocessing/augmentation export multiplies
+  count; default Roboflow augmentations preserve label fidelity).
+- License: CC-BY 4.0
 - Annotations: ICCMS 6-class polygons (RA1, RA2, RA3, RB4, RC5, RC6)
 
 Class collapse
 --------------
 
 The ICCMS 6-tier scale is collapsed to 3 classes for v0 to keep the
-deepest tier (RC6, ~pulp-near) from being starved by the 586-image
-corpus. Mapping (also documented in
-``docs/caries-class-mapping.md``)::
+deepest tier (RC6, ~pulp-near) from being starved by the corpus.
+Mapping (also documented in ``docs/caries-class-mapping.md``)::
 
     initial   = RA1 + RA2 + RA3   (enamel through EDJ)
     moderate  = RB4 + RC5         (outer + middle dentin)
@@ -43,9 +45,13 @@ from typing import Final
 _LOG = logging.getLogger(__name__)
 
 # Roboflow project + version identifiers — match the Renielaz universe page.
+# The project re-exports periodically with slightly different counts and
+# augmentation settings. Version 6199 (2024-01-26, 1483 images) was the
+# latest known at v0 ship time. Override via env var RENIELAZ_VERSION if
+# Roboflow re-uploads again (avoids a code change).
 _RF_WORKSPACE: Final[str] = "renielaz"
 _RF_PROJECT: Final[str] = "dental-caries-x-ray"
-_RF_VERSION_DEFAULT: Final[int] = 1
+_RF_VERSION_DEFAULT: Final[int] = int(os.environ.get("RENIELAZ_VERSION", "6199"))
 _RF_FORMAT: Final[str] = "yolov8"
 
 # Source ICCMS class names → internal 3-class collapse.
