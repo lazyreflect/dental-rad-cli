@@ -23,6 +23,7 @@ dependencies = [
   "matplotlib>=3.9.0",
   # Dataset download
   "requests>=2.32.0",
+  "roboflow>=1.1.0",
   # PHI scrub helper (if used)
   "pydicom>=3.0.0",
 ]
