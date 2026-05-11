@@ -22,83 +22,66 @@ git log --oneline -5
 Expected HEAD: at least 2525f97 ("feat(analyze): wire caries inference
 into orchestrator + gitignore eval BWs") or later.
 
-## Step 1: Install caries dependency
+## Step 1: Install caries dependency (v0.5 prep — optional)
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 uv pip install roboflow
 ```
 
-This adds the `roboflow` package the caries adapter needs (~5-10 MB +
-dependencies).
+The `roboflow` package is needed for the caries adapter, deferred to
+v0.5. Installing here is a no-op for v0 training but keeps the
+environment ready when the caries dataset gets sorted out.
 
-## Step 2: Roboflow API key
+## Step 2: Roboflow API key (v0.5 prep — optional)
 
-Joseph drops the **private** Roboflow API key (the one starting with
-`oZGE...`, no `rf_` prefix) into the venv env. From the PowerShell
-session in the repo root:
+Required only when caries actually trains in v0.5; can be skipped for
+v0 bone-loss-only training.
 
-```powershell
-# In PowerShell — substitute the actual key, do not commit it.
-$env:ROBOFLOW_API_KEY = "oZGE...rest-of-private-key"
-
-# Sanity check:
-if (-not $env:ROBOFLOW_API_KEY) { Write-Error "ROBOFLOW_API_KEY not set" } else { Write-Host "ROBOFLOW_API_KEY is set ($($env:ROBOFLOW_API_KEY.Length) chars)" }
-```
-
-Joseph will paste this command into your session with the real key. Do
-NOT echo the full key into chat after that.
-
-## Step 3: Re-run the full test suite
+## Step 3: Re-run the test suite
 
 ```powershell
 pytest tests\ -v
 ```
 
-Expected: **90 passed** (76 prior + 14 new caries tests). If anything
-fails on Windows but was green on the MacBook, paste the failing test
-names + tracebacks.
+Expected: **90 passed** (76 bone-loss + 14 caries). All caries tests
+use mocked SDK calls so they pass without real Roboflow data or
+trained weights.
 
-## Step 4: Download + prepare caries dataset
+## Steps 4 + 5: SKIP for v0
 
-```powershell
-.\scripts\download_caries_data.ps1
-```
+Caries dataset is deferred — see `docs/v0.5-caries-remediation.md` for
+the upstream-corruption story and v0.5 remediation paths. Do NOT run
+`scripts/download_caries_data.ps1` for v0.
 
-Downloads the Renielaz caries dataset from Roboflow (~10-50 MB
-depending on export format), runs the 3-class collapse adapter, writes
-`data/prepared/yolo_caries/` with the standard YOLO layout.
-
-If the script doesn't exist (older commit), run:
-```powershell
-python -c "from pathlib import Path; from dental_rad_cli.data.caries_adapter import download_renielaz, build_yolo_caries_dataset; r = download_renielaz(Path('data/caries')); build_yolo_caries_dataset(r, Path('data/prepared/yolo_caries'))"
-```
-
-## Step 5: Sanity-check ALL prepared datasets
+Sanity-check that DenPAR-prepared datasets are still in place from
+bootstrap:
 
 ```powershell
 Get-ChildItem data\prepared | Format-Table Name, LastWriteTime
 ```
 
-Expected: 5 directories — yolo_tooth_detect, yolo_tooth_seg, yolo_bone_seg,
-coco_keypoints, yolo_caries.
+Expected: 4 directories — yolo_tooth_detect, yolo_tooth_seg, yolo_bone_seg,
+coco_keypoints. (yolo_caries deferred to v0.5.)
 
-## Training sequence
+## Training sequence — v0 (bone-loss only, caries DEFERRED)
 
-The repo now has 7 training entrypoints (6 bone-loss models + 1 caries).
-Run them serially — RTX 4090 has plenty of VRAM but only one of these at
-a time avoids GPU contention.
+Caries pipeline is deferred to v0.5 due to upstream dataset corruption
+discovered at hour-0 bootstrap (see `docs/v0.5-caries-remediation.md`
+for the full story + remediation options).
 
-**Order:**
+The repo retains all caries code; the orchestrator gracefully skips
+caries when `weights/caries.pt` is absent. v0 ships bone-loss only.
+
+**Order — 6 stages:**
 1. tooth_detect      (YOLOv9e, 3-class, ~30-60 min on RTX 4090)
 2. segmentation_tooth (YOLOv8x-seg, ~30-60 min)
 3. segmentation_bone  (YOLOv8x-seg, ~30-60 min)
 4. keypoint_cej       (Keypoint R-CNN ResNet50-FPN, ~30-60 min)
 5. keypoint_bone      (Keypoint R-CNN ResNet50-FPN, ~30-60 min)
 6. keypoint_apex      (Keypoint R-CNN ResNet50-FPN, ~30-60 min)
-7. caries             (YOLOv8s, ~20-40 min — smaller dataset)
 
-Total wall: ~3.5-7 hours on RTX 4090. Patience for early-stop is
+Total wall: ~3.5-5 hours on RTX 4090. Patience for early-stop is
 20-30 epochs so many will end earlier than the 200-epoch cap.
 
 ## Kickoff: serialized full run
@@ -109,8 +92,11 @@ provides bash.exe at `C:\Program Files\Git\bin\bash.exe`.
 ```powershell
 mkdir -Force logs
 bash .\scripts\train_all.sh 2>&1 | Tee-Object -FilePath logs\train_all.log
-bash .\scripts\train_caries.sh 2>&1 | Tee-Object -FilePath logs\training-caries.log
 ```
+
+DO NOT run `train_caries.sh` for v0 — caries dataset is deferred (see
+`docs/v0.5-caries-remediation.md`). The orchestrator gracefully skips
+caries inference when `weights/caries.pt` is absent.
 
 If `bash` is not on PATH for some reason, run each stage manually via
 the Python entrypoints — refer to `scripts/train_*.sh` for exact
@@ -135,17 +121,17 @@ FAILURES: <any stages that errored — paste the traceback>
 If any stage fails completely, stop the train_all sequence and report.
 Don't auto-retry.
 
-## After all 7 land
+## After all 6 land (v0)
 
-When `weights/` has all 7 .pt files:
+When `weights/` has 6 .pt files:
 
 ```powershell
 Get-ChildItem weights\*.pt | Format-Table Name, Length
 ```
 
 Expected: tooth_detect.pt (~50 MB), segmentation_{tooth,bone}.pt
-(~50 MB each), keypoint_{cej,bone,apex}.pt (~160 MB each), caries.pt
-(~30 MB). Total ~640-700 MB.
+(~50 MB each), keypoint_{cej,bone,apex}.pt (~160 MB each).
+Total ~580 MB. (caries.pt is NOT expected at v0; see remediation doc.)
 
 Then standby for the orchestrator's next instruction (eval-set
 transfer + inference on scrubbed BWs at hour-5 gate).
