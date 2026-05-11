@@ -1,0 +1,48 @@
+[project]
+name = "dental-rad-cli"
+version = "0.0.1"
+description = "Chairside dental radiograph documentation aid (BW + PA) — bone-loss + interproximal caries detection, annotated PNG + JSON output."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Joseph Pitluck" }
+]
+
+dependencies = [
+  # ML stack — CUDA path target; install torch via index URL on pickles
+  "torch>=2.5.0",
+  "torchvision>=0.20.0",
+  "ultralytics>=8.3.0",          # YOLOv8 / YOLOv8-seg
+  # Image + data
+  "pillow>=10.4.0",
+  "numpy>=1.26.0",
+  "pandas>=2.2.0",
+  "opencv-python>=4.10.0",
+  # Annotation rendering
+  "matplotlib>=3.9.0",
+  # Dataset download
+  "requests>=2.32.0",
+  # PHI scrub helper (if used)
+  "pydicom>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "ruff>=0.7.0",
+]
+
+[project.scripts]
+dental-rad-cli = "dental_rad_cli.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dental_rad_cli"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

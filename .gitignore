@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# uv
+.venv/
+.uv-cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific: never commit training data, weights, or PHI
+data/                       # DenPAR + Roboflow datasets pulled by download scripts
+weights/                    # trained model checkpoints
+*.pt
+*.pth
+*.onnx
+
+# Eval set: only scrubbed copies in examples/eval/ are committed (and only if explicitly added)
+examples/eval/originals/    # belt-and-suspenders — originals must NEVER enter the repo
+examples/eval/output/       # generated annotation outputs
+
+# Test / debug artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Notebooks (we don't ship Jupyter — methodology-reference reads them upstream)
+*.ipynb
+.ipynb_checkpoints/
+
+# Local secrets / env
+.env
+.env.local
+*.secrets
