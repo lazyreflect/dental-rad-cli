@@ -41,7 +41,12 @@ weights/                    # trained model checkpoints
 *.pth
 *.onnx
 
-# Eval set: only scrubbed copies in examples/eval/ are committed (and only if explicitly added)
+# Eval set: scrubbed copies stay LOCAL by default — never enter the public repo.
+# Patient-derived images, even scrubbed, are kept off GitHub for v0. A future
+# synthetic eval set may be committed under a separate path with its own provenance docs.
+examples/eval/*.png
+examples/eval/*.jpg
+examples/eval/*.jpeg
 examples/eval/originals/    # belt-and-suspenders — originals must NEVER enter the repo
 examples/eval/output/       # generated annotation outputs
 

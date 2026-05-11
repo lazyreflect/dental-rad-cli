@@ -44,11 +44,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from dental_rad_cli.schema import (
     AnalysisResult,
+    CariesFinding,
     ImageMeta,
     Metadata,
     SCHEMA_VERSION,
     Summary,
     ToothFinding,
+    ToothKeypointsFull,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,7 @@ WEIGHTS_FILES: Dict[str, str] = {
     "keypoint_apex": "keypoint_apex.pt",
     "segmentation_tooth": "segmentation_tooth.pt",
     "segmentation_bone": "segmentation_bone.pt",
+    "caries": "caries.pt",
 }
 
 
@@ -105,6 +108,7 @@ class ModelBundle:
     _keypoint_apex: Optional[Any] = None
     _segmentation_tooth: Optional[Any] = None
     _segmentation_bone: Optional[Any] = None
+    _caries: Optional[Any] = None
 
     def __post_init__(self) -> None:
         self.weights_dir = Path(self.weights_dir)
@@ -149,6 +153,24 @@ class ModelBundle:
             from ultralytics import YOLO
             self._segmentation_bone = YOLO(str(self._weight_path("segmentation_bone")))
         return self._segmentation_bone
+
+    def get_caries(self) -> Any:
+        if self._caries is None:
+            from ultralytics import YOLO
+            self._caries = YOLO(str(self._weight_path("caries")))
+        return self._caries
+
+    def caries_weights_path(self) -> Optional[Path]:
+        """Return the caries weights path if present, else None.
+
+        Caries detection is graceful: when weights are absent (e.g. an
+        old training run that predates caries), the orchestrator skips
+        the stage rather than raising. The other stages remain strict.
+        """
+        try:
+            return self._weight_path("caries")
+        except WeightsNotFoundError:
+            return None
 
     # --- Keypoint R-CNN models (CLAHE-enhanced RGB) --------------------
 
@@ -251,13 +273,46 @@ def _run_segmentation(
     return [], []
 
 
-def _run_caries_detection(bundle: ModelBundle, rgb: Any) -> List[Dict[str, Any]]:
-    """Caries pathway integration point. v0: returns nothing.
+def _run_caries_detection(
+    bundle: ModelBundle,
+    rgb: Any,
+    detections: List[Dict[str, Any]],
+) -> List[CariesFinding]:
+    """Run caries inference; map results to schema CariesFinding rows.
 
-    Wiring lands in v0.5 when the caries weights are trained against the
-    Roboflow BW caries dataset.
+    Behaviour:
+    - If ``weights/caries.pt`` is missing → returns ``[]`` (graceful
+      skip; the rest of the pipeline still runs).
+    - Otherwise calls ``pipeline.caries_inference.detect_caries`` with
+      lightweight ToothFinding stubs constructed from raw tooth
+      detections. Only the bbox is needed for surface assignment;
+      keypoints / FDI / pattern fields are placeholder.
+    - If ``detections`` is empty, caries is still run on the image; all
+      findings come back with ``surface="unknown"`` for the rule layer
+      to route through ``low_confidence_findings``.
     """
-    return []
+    weights_path = bundle.caries_weights_path()
+    if weights_path is None:
+        return []
+
+    from dental_rad_cli.pipeline.caries_inference import detect_caries
+
+    tooth_stubs: List[ToothFinding] = []
+    for i, det in enumerate(detections):
+        bbox = det.get("bbox") if isinstance(det, dict) else None
+        if bbox is None:
+            continue
+        tooth_stubs.append(
+            ToothFinding(
+                fdi=str(det.get("fdi", i)),
+                universal=str(det.get("universal", i)),
+                bbox=tuple(float(v) for v in bbox),
+                confidence=float(det.get("confidence", 0.0)),
+                keypoints=ToothKeypointsFull(),
+            )
+        )
+
+    return detect_caries(rgb, weights_path, tooth_bboxes=tooth_stubs or None)
 
 
 def _build_findings_from_stages(
@@ -265,7 +320,7 @@ def _build_findings_from_stages(
     keypoints: List[Dict[str, Any]],
     tooth_polys: List[Any],
     bone_polys: List[Any],
-    caries: List[Dict[str, Any]],
+    caries: List[CariesFinding],
 ) -> Tuple[List[ToothFinding], Summary]:
     """Compose rule-layer outputs into ToothFindings + Summary.
 
@@ -543,7 +598,7 @@ def analyze(
         detections = _run_tooth_detection(bundle, rgb)
         keypoints = _run_keypoint_passes(bundle, rgb_clahe, detections)
         tooth_polys, bone_polys = _run_segmentation(bundle, rgb)
-        caries = _run_caries_detection(bundle, rgb)  # v0.5
+        caries = _run_caries_detection(bundle, rgb, detections)
 
         teeth, summary = _build_findings_from_stages(
             detections, keypoints, tooth_polys, bone_polys, caries,
