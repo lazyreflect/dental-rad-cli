@@ -484,7 +484,8 @@ def _write_yolo_dataset_yaml(
         f"val: images/val\n"
         f"test: images/test\n"
         f"nc: {nc}\n"
-        f"{names_line}"
+        f"{names_line}",
+        encoding="utf-8",
     )
     return yaml_path
 

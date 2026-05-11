@@ -471,7 +471,7 @@ def _write_json(result: AnalysisResult, out_path: Path) -> Path:
     import json
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(result.to_dict(), indent=2))
+    out_path.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
     return out_path
 
 
@@ -501,7 +501,7 @@ def _write_note_draft(result: AnalysisResult, out_path: Path) -> Path:
     from dental_rad_cli.note_draft import render_note
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(render_note(result))
+    out_path.write_text(render_note(result), encoding="utf-8")
     return out_path
 
 
