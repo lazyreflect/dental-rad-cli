@@ -8,84 +8,113 @@ upstream conversation context.
 ---
 
 ```
-Bootstrap is green. Time to train the 6 models.
+Bootstrap is green. Before training, pull the latest code (caries
+pipeline + analyze.py wiring landed since bootstrap pinned at 3a6eb08).
 
-## Quick state check before kickoff
-
-Confirm in one PowerShell session that all of these still hold:
+## Step 0: Sync to latest main
 
 ```powershell
 cd C:\Users\13038\repos\dental-rad-cli
-git pull
-.\.venv\Scripts\Activate.ps1
-python -c "import torch; assert torch.cuda.is_available(); print('GPU:', torch.cuda.get_device_name(0))"
-Test-Path .\data\denpar\Dataset\Training\Images
-Test-Path .\data\prepared\yolo_tooth_detect
-Test-Path .\data\prepared\coco_keypoints
+git pull origin main
+git log --oneline -5
 ```
 
-If any fail, STOP and report. Common cases:
-- `git pull` shows new commits → that's expected, the orchestrator
-  may have pushed updates while bootstrap was running.
-- `data\prepared\...` missing → run `.\scripts\prepare_datasets.ps1`.
+Expected HEAD: at least 2525f97 ("feat(analyze): wire caries inference
+into orchestrator + gitignore eval BWs") or later.
+
+## Step 1: Install caries dependency
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+uv pip install roboflow
+```
+
+This adds the `roboflow` package the caries adapter needs (~5-10 MB +
+dependencies).
+
+## Step 2: Roboflow API key
+
+Joseph drops the **private** Roboflow API key (the one starting with
+`oZGE...`, no `rf_` prefix) into the venv env. From the PowerShell
+session in the repo root:
+
+```powershell
+# In PowerShell — substitute the actual key, do not commit it.
+$env:ROBOFLOW_API_KEY = "oZGE...rest-of-private-key"
+
+# Sanity check:
+if (-not $env:ROBOFLOW_API_KEY) { Write-Error "ROBOFLOW_API_KEY not set" } else { Write-Host "ROBOFLOW_API_KEY is set ($($env:ROBOFLOW_API_KEY.Length) chars)" }
+```
+
+Joseph will paste this command into your session with the real key. Do
+NOT echo the full key into chat after that.
+
+## Step 3: Re-run the full test suite
+
+```powershell
+pytest tests\ -v
+```
+
+Expected: **90 passed** (76 prior + 14 new caries tests). If anything
+fails on Windows but was green on the MacBook, paste the failing test
+names + tracebacks.
+
+## Step 4: Download + prepare caries dataset
+
+```powershell
+.\scripts\download_caries_data.ps1
+```
+
+Downloads the Renielaz caries dataset from Roboflow (~10-50 MB
+depending on export format), runs the 3-class collapse adapter, writes
+`data/prepared/yolo_caries/` with the standard YOLO layout.
+
+If the script doesn't exist (older commit), run:
+```powershell
+python -c "from pathlib import Path; from dental_rad_cli.data.caries_adapter import download_renielaz, build_yolo_caries_dataset; r = download_renielaz(Path('data/caries')); build_yolo_caries_dataset(r, Path('data/prepared/yolo_caries'))"
+```
+
+## Step 5: Sanity-check ALL prepared datasets
+
+```powershell
+Get-ChildItem data\prepared | Format-Table Name, LastWriteTime
+```
+
+Expected: 5 directories — yolo_tooth_detect, yolo_tooth_seg, yolo_bone_seg,
+coco_keypoints, yolo_caries.
 
 ## Training sequence
 
-The repo has 6 training entrypoints. Order matters because keypoint
-training needs tooth-detection weights for the COCO-keypoints adapter
-ordering (it does NOT, actually — they're all independent. Run in any
-order, but bone-segmentation and tooth-segmentation can race for GPU
-memory so do them serially).
+The repo now has 7 training entrypoints (6 bone-loss models + 1 caries).
+Run them serially — RTX 4090 has plenty of VRAM but only one of these at
+a time avoids GPU contention.
 
 **Order:**
-1. tooth_detect (YOLOv9e, 3-class, ~30-60 min on RTX 4090)
+1. tooth_detect      (YOLOv9e, 3-class, ~30-60 min on RTX 4090)
 2. segmentation_tooth (YOLOv8x-seg, ~30-60 min)
-3. segmentation_bone (YOLOv8x-seg, ~30-60 min)
-4. keypoint_cej (Keypoint R-CNN ResNet50-FPN, ~30-60 min)
-5. keypoint_bone (Keypoint R-CNN ResNet50-FPN, ~30-60 min)
-6. keypoint_apex (Keypoint R-CNN ResNet50-FPN, ~30-60 min)
+3. segmentation_bone  (YOLOv8x-seg, ~30-60 min)
+4. keypoint_cej       (Keypoint R-CNN ResNet50-FPN, ~30-60 min)
+5. keypoint_bone      (Keypoint R-CNN ResNet50-FPN, ~30-60 min)
+6. keypoint_apex      (Keypoint R-CNN ResNet50-FPN, ~30-60 min)
+7. caries             (YOLOv8s, ~20-40 min — smaller dataset)
 
-Total wall: ~3-6 hours on RTX 4090. Patience for early-stop is set to
+Total wall: ~3.5-7 hours on RTX 4090. Patience for early-stop is
 20-30 epochs so many will end earlier than the 200-epoch cap.
 
-## Two ways to kick off
+## Kickoff: serialized full run
 
-**Option A — serialized (recommended for hour-0):**
+Recommended for hour-0. Bash-via-Git is fine since Git for Windows
+provides bash.exe at `C:\Program Files\Git\bin\bash.exe`.
 
 ```powershell
-# Convert the bash train_all.sh to PowerShell-runnable sequence:
 mkdir -Force logs
 bash .\scripts\train_all.sh 2>&1 | Tee-Object -FilePath logs\train_all.log
+bash .\scripts\train_caries.sh 2>&1 | Tee-Object -FilePath logs\training-caries.log
 ```
 
-If bash is on PATH (Git for Windows provides it at C:\Program Files\
-Git\bin\bash.exe), this works. If not, run each stage manually:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-python -m dental_rad_cli.training.tooth_detect --data data\prepared\yolo_tooth_detect\data.yaml --weights weights\tooth_detect.pt 2>&1 | Tee-Object -FilePath logs\training-tooth_detect.log
-python -m dental_rad_cli.training.segmentation --target tooth --data data\prepared\yolo_tooth_seg\data.yaml --weights weights\segmentation_tooth.pt 2>&1 | Tee-Object -FilePath logs\training-segmentation_tooth.log
-python -m dental_rad_cli.training.segmentation --target bone --data data\prepared\yolo_bone_seg\data.yaml --weights weights\segmentation_bone.pt 2>&1 | Tee-Object -FilePath logs\training-segmentation_bone.log
-python -m dental_rad_cli.training.keypoints --landmark cej --dataset data\prepared\coco_keypoints --weights weights\keypoint_cej.pt 2>&1 | Tee-Object -FilePath logs\training-keypoint_cej.log
-python -m dental_rad_cli.training.keypoints --landmark bone --dataset data\prepared\coco_keypoints --weights weights\keypoint_bone.pt 2>&1 | Tee-Object -FilePath logs\training-keypoint_bone.log
-python -m dental_rad_cli.training.keypoints --landmark apex --dataset data\prepared\coco_keypoints --weights weights\keypoint_apex.pt 2>&1 | Tee-Object -FilePath logs\training-keypoint_apex.log
-```
-
-NOTE: the python -m flags above assume the training modules have `if
-__name__ == "__main__"` argparse blocks. If they don't (per the
-subagent's implementation, `train()` is a function), wrap each call in
-a one-line Python invocation that imports and calls `train(...)`. The
-bash scripts in `scripts/` already do this — easier to run via bash.
-
-**Option B — start the first one and watch:**
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-bash .\scripts\train_tooth_detect.sh 2>&1 | Tee-Object -FilePath logs\training-tooth_detect.log
-```
-
-After it finishes (or early-stops), report back the metrics and we'll
-decide whether to continue with the next stage.
+If `bash` is not on PATH for some reason, run each stage manually via
+the Python entrypoints — refer to `scripts/train_*.sh` for exact
+commands.
 
 ## What to report during training
 
@@ -106,29 +135,49 @@ FAILURES: <any stages that errored — paste the traceback>
 If any stage fails completely, stop the train_all sequence and report.
 Don't auto-retry.
 
-## After all 6 land
+## After all 7 land
 
-When `weights/` has all 6 .pt files:
+When `weights/` has all 7 .pt files:
 
 ```powershell
 Get-ChildItem weights\*.pt | Format-Table Name, Length
 ```
 
 Expected: tooth_detect.pt (~50 MB), segmentation_{tooth,bone}.pt
-(~50 MB each), keypoint_{cej,bone,apex}.pt (~160 MB each). Total
-~640 MB.
+(~50 MB each), keypoint_{cej,bone,apex}.pt (~160 MB each), caries.pt
+(~30 MB). Total ~640-700 MB.
 
-Then standby for the orchestrator's next instruction (inference on
-scrubbed BWs).
+Then standby for the orchestrator's next instruction (eval-set
+transfer + inference on scrubbed BWs at hour-5 gate).
+
+## Eval-set transfer (deferred until end of training)
+
+Four scrubbed bitewings live on the MacBook at:
+```
+/Users/josephpitluck/repos/work/dental-rad-cli/examples/eval/bw01.png
+/Users/josephpitluck/repos/work/dental-rad-cli/examples/eval/bw02.png
+/Users/josephpitluck/repos/work/dental-rad-cli/examples/eval/bw03.png
+/Users/josephpitluck/repos/work/dental-rad-cli/examples/eval/bw04.png
+```
+
+They're gitignored (PHI-derived even if scrubbed). They need to land on
+pickles at `C:\Users\13038\repos\dental-rad-cli\examples\eval\` before
+inference. Three transfer options — orchestrator will pick one when
+training nears completion:
+- Tailscale Drive (cleanest if available)
+- Enable Windows OpenSSH server + scp
+- Simple `python -m http.server` on MacBook + curl from pickles
+  (Tailscale-routed; no SSH needed)
 
 ## What you do NOT do during training
 
-- Don't run inference yet — Joseph's scrubbed BWs land at hour-5.
+- Don't run inference yet — eval set isn't on pickles yet.
 - Don't touch source files. If a stage fails, report — orchestrator
   will fix on the MacBook side and push.
 - Don't kill long-running processes "just to check status." Let
   early-stopping handle convergence.
 - Don't restart bootstrap. Everything's installed.
+- Don't echo the ROBOFLOW_API_KEY back into chat.
 
 Standing by after each training stage for the orchestrator's go-ahead
 to continue.
