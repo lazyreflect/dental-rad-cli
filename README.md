@@ -83,3 +83,24 @@ uv run dental-rad-cli analyze examples/eval/bw01.jpg --out ./results/
 ```
 
 Cold-pickup install < 30 min once `weights/` is populated.
+
+## Eval (held-out test sets)
+
+```bash
+bash scripts/eval.sh
+```
+
+Headline metrics:
+
+- `cej_collapse_rate` — CEJ keypoint head, DenPAR Testing split, 200 PAs. Fraction of high-confidence predictions where mesial/distal CEJ < 10 px apart (lower is better).
+- `caries_map50` / `caries_map50_95` — caries head, Baasils ICCMS test split.
+
+Baseline at HEAD: `cej_collapse_rate = 0.3071`, `caries_map50 = 0.6478` (val, n=58).
+
+## Autoresearch
+
+Karpathy-style overnight research loop targeting the CEJ collapse metric: see [`autoresearch/cej-collapse/program.md`](autoresearch/cej-collapse/program.md). One file the agent edits, fixed wall-clock budget, results logged to `results.tsv`.
+
+## Why we evaluate
+
+See [`output/2026-05-12-lessons-learned-26hr-session.md`](output/2026-05-12-lessons-learned-26hr-session.md) for the pattern catalog of what burned 26 hours of human time before either metric existed.

@@ -1,0 +1,2 @@
+commit	cej_collapse_rate	training_seconds	status	description
+5142cba	0.3071	0.0	baseline	pre-autoresearch baseline (existing weights/keypoint_cej.pt)
