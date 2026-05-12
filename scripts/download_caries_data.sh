@@ -36,10 +36,10 @@ echo "caries: step 1/2 — download Renielaz from Roboflow → ${RAW_DIR}"
 python - <<PY
 import os
 from pathlib import Path
-from dental_rad_cli.data.caries_adapter import download_renielaz
+from dental_rad_cli.data.caries_adapter import download_caries_dataset
 
 raw = Path(r"${RAW_DIR}")
-out = download_renielaz(raw)
+out = download_caries_dataset(raw)
 print(f"caries: roboflow export at {out}")
 PY
 
@@ -48,12 +48,12 @@ python - <<PY
 from pathlib import Path
 from dental_rad_cli.data.caries_adapter import (
     build_yolo_caries_dataset,
-    download_renielaz,
+    download_caries_dataset,
 )
 
 raw = Path(r"${RAW_DIR}")
-# download_renielaz is idempotent; calling it again returns the existing path.
-roboflow_root = download_renielaz(raw)
+# download_caries_dataset is idempotent; calling it again returns the existing path.
+roboflow_root = download_caries_dataset(raw)
 yaml = build_yolo_caries_dataset(roboflow_root, Path(r"${PREPARED_DIR}"))
 print(f"caries: data.yaml at {yaml}")
 PY

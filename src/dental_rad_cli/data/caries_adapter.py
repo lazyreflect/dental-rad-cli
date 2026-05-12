@@ -1,25 +1,44 @@
-"""Renielaz Dental Caries X-ray (Roboflow) → internal YOLO format adapter.
+"""Baasils ICCMS Dental Caries (Roboflow) → internal YOLO format adapter.
 
 This adapter is the caries counterpart to :mod:`denpar_adapter` for the
-tooth/keypoint pipeline. It downloads the Renielaz dataset from Roboflow
+tooth/keypoint pipeline. It downloads the Baasils dataset from Roboflow
 and converts its 6-class ICCMS annotation into our 3-class collapse
 (``initial`` / ``moderate`` / ``deep``).
 
+History note
+------------
+
+v0 attempted to use the Renielaz ``dental-caries-x-ray`` Roboflow
+project. That project's class list was structurally corrupted —
+description-bullet text was serialized as 6 garbage classes alongside
+the 6 real ICCMS classes, with only 205/2978 annotations bound to real
+classes and only 13 RC6 samples. See ``docs/v0.5-caries-remediation.md``
+for the full forensic. The Baasils ICCMS project is the validated
+replacement, confirmed clean by direct REST-API probe + the
+Salehizeinabadi 2025 paper's per-class mAP50 numbers (RC6 = 0.80
+implies trainable distribution).
+
 Dataset
 -------
-- Source: https://universe.roboflow.com/renielaz/dental-caries-x-ray
-- Size: ~586 source bitewings, expanded to 1483 images at the version
-  used by v0 (Roboflow's preprocessing/augmentation export multiplies
-  count; default Roboflow augmentations preserve label fidelity).
-- License: CC-BY 4.0
-- Annotations: ICCMS 6-class polygons (RA1, RA2, RA3, RB4, RC5, RC6)
+- Source: https://universe.roboflow.com/baasils-workspace/iccms-dental-caries-etomb
+- Size: 537 source bitewings, 1455 images at v3 (Roboflow augmentation:
+  3x with flip + rotate ±15° + brightness ±15%).
+- License: Public Domain
+- Type: Instance segmentation (polygons), exported as YOLOv8 bboxes
+- Annotations (real ICCMS distribution per Roboflow project metadata):
+  RA1=84, RA2=405, RA3=167, RB4=121, RC5=124, RC6=97  →  998 total
+
+After 3-class collapse:
+  initial (RA1+RA2+RA3)   = 656
+  moderate (RB4+RC5)      = 245
+  deep (RC6)              = 97
 
 Class collapse
 --------------
 
-The ICCMS 6-tier scale is collapsed to 3 classes for v0 to keep the
-deepest tier (RC6, ~pulp-near) from being starved by the corpus.
-Mapping (also documented in ``docs/caries-class-mapping.md``)::
+The ICCMS 6-tier scale is collapsed to 3 classes for v0.5 to keep the
+deepest tier (RC6, ~pulp-near) trainable. Mapping (also documented in
+``docs/caries-class-mapping.md``)::
 
     initial   = RA1 + RA2 + RA3   (enamel through EDJ)
     moderate  = RB4 + RC5         (outer + middle dentin)
@@ -44,14 +63,13 @@ from typing import Final
 
 _LOG = logging.getLogger(__name__)
 
-# Roboflow project + version identifiers — match the Renielaz universe page.
-# The project re-exports periodically with slightly different counts and
-# augmentation settings. Version 6199 (2024-01-26, 1483 images) was the
-# latest known at v0 ship time. Override via env var RENIELAZ_VERSION if
-# Roboflow re-uploads again (avoids a code change).
-_RF_WORKSPACE: Final[str] = "renielaz"
-_RF_PROJECT: Final[str] = "dental-caries-x-ray"
-_RF_VERSION_DEFAULT: Final[int] = int(os.environ.get("RENIELAZ_VERSION", "6199"))
+# Roboflow project + version identifiers — Baasils ICCMS dental caries.
+# v3 (2025-08-18, 1455 images post-augmentation) is the latest known at
+# v0.5 ship time. Override via env var CARIES_DATASET_VERSION if Roboflow
+# re-uploads again (avoids a code change).
+_RF_WORKSPACE: Final[str] = "baasils-workspace"
+_RF_PROJECT: Final[str] = "iccms-dental-caries-etomb"
+_RF_VERSION_DEFAULT: Final[int] = int(os.environ.get("CARIES_DATASET_VERSION", "3"))
 _RF_FORMAT: Final[str] = "yolov8"
 
 # Source ICCMS class names → internal 3-class collapse.
@@ -77,8 +95,8 @@ _INTERNAL_INDEX: Final[dict[str, int]] = {
 # ---------------------------------------------------------------------------
 
 
-def download_renielaz(output_root: Path, api_key: str | None = None) -> Path:
-    """Download the Renielaz dental-caries dataset via the Roboflow API.
+def download_caries_dataset(output_root: Path, api_key: str | None = None) -> Path:
+    """Download the Baasils ICCMS caries dataset via the Roboflow API.
 
     Idempotent: if the dataset already appears to be downloaded
     (``data.yaml`` present under ``output_root``), the function returns
@@ -105,7 +123,7 @@ def download_renielaz(output_root: Path, api_key: str | None = None) -> Path:
     # output_root before touching the network.
     existing = _find_existing_dataset(output_root)
     if existing is not None:
-        _LOG.info("renielaz: dataset already present at %s", existing)
+        _LOG.info("caries_adapter: dataset already present at %s", existing)
         return existing
 
     key = api_key or os.environ.get("ROBOFLOW_API_KEY")
@@ -138,7 +156,7 @@ def download_renielaz(output_root: Path, api_key: str | None = None) -> Path:
             raise RuntimeError(
                 f"roboflow download completed but no data.yaml found under {output_root}"
             )
-    _LOG.info("renielaz: downloaded to %s", ds_path)
+    _LOG.info("caries_adapter: downloaded to %s", ds_path)
     return ds_path
 
 
@@ -159,7 +177,7 @@ def build_yolo_caries_dataset(roboflow_root: Path, output_root: Path) -> Path:
 
     Args:
         roboflow_root: Path containing the Roboflow YOLOv8 export's
-            ``data.yaml`` (the value returned by :func:`download_renielaz`).
+            ``data.yaml`` (the value returned by :func:`download_caries_dataset`).
         output_root: Destination directory. Existing files are
             overwritten; idempotent re-runs are safe.
 
@@ -204,7 +222,7 @@ def build_yolo_caries_dataset(roboflow_root: Path, output_root: Path) -> Path:
     for rf_split, lc_split in rf_splits.items():
         src_split = roboflow_root / rf_split
         if not src_split.is_dir():
-            _LOG.warning("renielaz: split missing in source: %s", src_split)
+            _LOG.warning("caries_adapter: split missing in source: %s", src_split)
             continue
         src_images = src_split / "images"
         src_labels = src_split / "labels"
@@ -235,7 +253,7 @@ def build_yolo_caries_dataset(roboflow_root: Path, output_root: Path) -> Path:
                         continue
                     if src_cls not in src_to_internal:
                         _LOG.warning(
-                            "renielaz: unknown source class id %d in %s; row skipped",
+                            "caries_adapter: unknown source class id %d in %s; row skipped",
                             src_cls,
                             lbl,
                         )

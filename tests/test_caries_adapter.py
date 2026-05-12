@@ -94,7 +94,7 @@ def test_parse_yaml_names_flow_form(tmp_path: Path) -> None:
 
 
 def test_build_yolo_caries_dataset_collapses_all_six_classes(tmp_path: Path) -> None:
-    rf_root = tmp_path / "renielaz"
+    rf_root = tmp_path / "caries"
     # Match the Roboflow project's likely class order; the adapter must
     # work regardless of ordering because it indexes through data.yaml.
     class_names = ["RA1", "RA2", "RA3", "RB4", "RC5", "RC6"]
@@ -149,7 +149,7 @@ def test_build_yolo_caries_dataset_collapses_all_six_classes(tmp_path: Path) -> 
 
 def test_build_yolo_caries_dataset_handles_reshuffled_source_order(tmp_path: Path) -> None:
     """If Roboflow ships classes in a different order, the collapse must still hold."""
-    rf_root = tmp_path / "renielaz"
+    rf_root = tmp_path / "caries"
     # Deliberately scramble.
     class_names = ["RC6", "RA1", "RB4", "RA3", "RA2", "RC5"]
     _write_roboflow_export(
@@ -175,7 +175,7 @@ def test_build_yolo_caries_dataset_handles_reshuffled_source_order(tmp_path: Pat
 
 
 def test_build_yolo_caries_dataset_rejects_unknown_class(tmp_path: Path) -> None:
-    rf_root = tmp_path / "renielaz"
+    rf_root = tmp_path / "caries"
     _write_roboflow_export(
         rf_root,
         ["RA1", "RA2", "FOO"],

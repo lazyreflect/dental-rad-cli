@@ -2,22 +2,41 @@
 
 ## Source dataset
 
-Renielaz Dental Caries X-ray on Roboflow
-(<https://universe.roboflow.com/renielaz/dental-caries-x-ray>):
-586 bitewing radiographs, CC-BY 4.0, polygon-annotated against the
-ICCMS 6-tier radiographic scale (RA1, RA2, RA3, RB4, RC5, RC6).
+Baasils ICCMS Dental Caries on Roboflow
+(<https://universe.roboflow.com/baasils-workspace/iccms-dental-caries-etomb>):
+537 source bitewing radiographs, Public Domain license, polygon-
+annotated against the ICCMS 6-tier radiographic scale
+(RA1, RA2, RA3, RB4, RC5, RC6). Roboflow v3 augments to 1455 images
+(3× with flip + rotate ±15° + brightness ±15%).
+
+The earlier v0-considered dataset (Renielaz `dental-caries-x-ray`) was
+abandoned at hour-0 due to a structurally corrupted class list with
+only 13 RC6 samples. See `v0.5-caries-remediation.md` for the forensic.
+Baasils is the validated replacement, confirmed clean by direct REST-API
+probe of the Roboflow project metadata + the Salehizeinabadi 2025
+paper's per-class mAP50 results (RC6 = 0.80 implies trainable
+distribution).
+
+Real ICCMS distribution per the Roboflow project metadata:
+
+| ICCMS class | Annotations |
+|-------------|------------:|
+| RA1 | 84 |
+| RA2 | 405 |
+| RA3 | 167 |
+| RB4 | 121 |
+| RC5 | 124 |
+| RC6 | 97 |
+| **Total** | **998** |
 
 ## Why a 3-class collapse
 
-A direct 6-class model trained on 586 images averages ~98 images per
-class. The deepest tier (RC6, inner-dentin / pulp-near) is also the
-rarest in the source distribution, so the effective sample count for
-RC6 drops well below that average and starves training. A 5-class
-collapse (merging just RA1+RA2+RA3) helps but still leaves RC5 thin.
-The 3-class collapse below pools enamel and middle-dentin tiers and
-keeps RC6 isolated (preserving deep-caries recall as a separately
-auditable class), bringing per-class sample counts into a range YOLOv8s
-can fit at this corpus size:
+The Roboflow project metadata shows real ICCMS counts of 84/405/167/
+121/124/97 across the 6 tiers. A direct 6-class YOLOv8s model could
+plausibly train at this size, but the imbalance between RA2 (405) and
+RA1 (84) is large; pooling enamel tiers smooths it. The deepest tier
+(RC6 = 97 samples) is preserved as a separately auditable class
+because deep-caries recall is the load-bearing clinical signal.
 
 ```
 initial   = RA1 + RA2 + RA3   (enamel through enamel-dentin junction)
@@ -43,5 +62,5 @@ output to the schema as:
 | `2` deep | RC6 | `"D3"` |
 
 The intermediate `"E2"` and `"D2"` literals are reserved for a future
-higher-resolution model trained on a larger corpus; v0 emits only
+higher-resolution model trained on a larger corpus; v0.5 emits only
 `"E1"`, `"D1"`, and `"D3"`.

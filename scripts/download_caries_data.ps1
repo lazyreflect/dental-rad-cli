@@ -30,8 +30,8 @@ $env:PYTHONPATH = "$RepoRoot\src;$env:PYTHONPATH"
 Write-Host "caries: step 1/2 - download Renielaz from Roboflow -> $RawDir"
 $Step1 = @"
 from pathlib import Path
-from dental_rad_cli.data.caries_adapter import download_renielaz
-out = download_renielaz(Path(r'$RawDir'))
+from dental_rad_cli.data.caries_adapter import download_caries_dataset
+out = download_caries_dataset(Path(r'$RawDir'))
 print(f'caries: roboflow export at {out}')
 "@
 $Step1 | python -
@@ -41,10 +41,10 @@ $Step2 = @"
 from pathlib import Path
 from dental_rad_cli.data.caries_adapter import (
     build_yolo_caries_dataset,
-    download_renielaz,
+    download_caries_dataset,
 )
 raw = Path(r'$RawDir')
-roboflow_root = download_renielaz(raw)
+roboflow_root = download_caries_dataset(raw)
 yaml = build_yolo_caries_dataset(roboflow_root, Path(r'$PreparedDir'))
 print(f'caries: data.yaml at {yaml}')
 "@
