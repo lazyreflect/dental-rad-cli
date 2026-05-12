@@ -1,15 +1,15 @@
 """Matplotlib-based annotated PNG renderer.
 
-Produces a side-by-side image: clean original on the left, annotation
-overlay on the right. The annotated half carries tooth bounding boxes,
-CEJ + bone-crest landmarks, CEJ→bone-crest severity-tier-colored
-segments, % bone-loss labels, defect-pattern shading (hatched for
-vertical, solid for horizontal), and a summary banner at top. Low-
-confidence findings are drawn with dashed outlines.
+Produces a single full-resolution annotated PNG matching the input image
+dimensions. Overlays include tooth bounding boxes, CEJ + bone-crest
+landmarks, CEJ→bone-crest severity-tier-colored segments, % bone-loss
+labels, caries bounding boxes with depth labels, defect-pattern shading
+(hatched for vertical, solid for horizontal), and a summary banner at
+top. Low-confidence findings are drawn with dashed outlines.
 
-Design source: see ``output/proposals/2026-05-11-dental-rad-cli-v0-
-design.md`` §"Annotated PNG output design". The implementation here is
-fresh code; no upstream paper repo content is reused.
+Output is annotated-only at native input resolution — no original
+reference panel. Doctors verifying findings already see the radiograph
+in their PMS; the AI overlay is what they need from this tool.
 
 Color discipline
 ----------------
@@ -19,9 +19,11 @@ chairside-monitor color profiles:
 
 - CEJ landmarks   → green dot
 - Bone-crest      → red dot
+- Apex            → purple dot
 - Mild segment    → green
 - Moderate        → goldenrod (amber)
-- Severe         → firebrick (red)
+- Severe          → firebrick (red)
+- Caries bbox     → cyan (distinct from severity palette)
 - Vertical fill   → hatched ("/" or "\\\\")
 - Horizontal fill → solid translucent
 """
@@ -39,10 +41,10 @@ from matplotlib.patches import Rectangle
 from dental_rad_cli.schema import (
     AnalysisResult,
     BoneLossSite,
+    CariesFinding,
     LowConfidenceFinding,
     SeverityTier,
     ToothFinding,
-    ToothKeypointsFull,
 )
 
 # ---------------------------------------------------------------------------
@@ -52,6 +54,8 @@ from dental_rad_cli.schema import (
 _BBOX_EDGE = "#888888"
 _CEJ_DOT = "#2ca02c"   # green
 _CREST_DOT = "#d62728"  # red
+_APEX_DOT = "#9467bd"   # purple
+_CARIES_EDGE = "#17becf"  # cyan — distinct from severity palette
 
 _TIER_COLORS = {
     "mild": "#2ca02c",       # green
@@ -59,22 +63,15 @@ _TIER_COLORS = {
     "severe": "#b22222",     # firebrick
 }
 
-_LABEL_BG = dict(facecolor="black", alpha=0.6, pad=1.5, edgecolor="none")
-_LABEL_FONT = dict(color="white", fontsize=6, family="monospace")
+# Render at native input resolution. DPI=100 means figure-inches map
+# 1:1 to image-pixels at 100 px/inch — convenient round number; the
+# absolute value doesn't matter as long as figsize × dpi == image_size.
+_RENDER_DPI = 100
 
 
-def _midpoint(
-    p1: Optional[Tuple[float, float, float]],
-    p2: Optional[Tuple[float, float, float]],
-) -> Optional[Tuple[float, float]]:
-    """Return the midpoint of two confidence-tagged keypoints, or one if only one is present."""
-    if p1 is None and p2 is None:
-        return None
-    if p1 is None:
-        return (float(p2[0]), float(p2[1]))
-    if p2 is None:
-        return (float(p1[0]), float(p1[1]))
-    return ((p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0)
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def _low_conf_set(findings: Iterable[LowConfidenceFinding]) -> Set[Tuple[str, Optional[str]]]:
@@ -84,18 +81,35 @@ def _low_conf_set(findings: Iterable[LowConfidenceFinding]) -> Set[Tuple[str, Op
 
 def _site_is_low_confidence(
     tooth_fdi: str,
-    surface: str,
+    surface: Optional[str],
     low_conf: Set[Tuple[str, Optional[str]]],
 ) -> bool:
     return (tooth_fdi, surface) in low_conf or (tooth_fdi, None) in low_conf
+
+
+def _font_scale(image_h: int) -> float:
+    """Return a font-size multiplier so labels remain readable across image sizes.
+
+    Calibrated so a 1000-px-tall image renders at 1.0 (the historical
+    default), with linear scaling for larger/smaller inputs.
+    """
+    return max(0.6, image_h / 1000.0)
 
 
 def _draw_tooth(
     ax: plt.Axes,
     tooth: ToothFinding,
     low_conf: Set[Tuple[str, Optional[str]]],
+    font_scale: float,
 ) -> None:
     """Draw all annotations for one tooth on the given axes."""
+    fs_label = 8 * font_scale
+    fs_pct = 8 * font_scale
+    marker_size = 5 * font_scale
+    line_w = 2.0 * font_scale
+
+    label_bg = dict(facecolor="black", alpha=0.65, pad=2.0, edgecolor="none")
+
     # Bounding box
     if tooth.bbox is not None:
         x1, y1, x2, y2 = tooth.bbox
@@ -106,17 +120,17 @@ def _draw_tooth(
             y2 - y1,
             fill=False,
             edgecolor=_BBOX_EDGE,
-            linewidth=0.8,
+            linewidth=1.0 * font_scale,
             linestyle="--" if is_low else "-",
         ))
         ax.text(
-            x1 + 2,
-            y1 + 8,
+            x1 + 3,
+            y1 + 12 * font_scale,
             tooth.fdi,
             color="white",
-            fontsize=6,
+            fontsize=fs_label,
             family="monospace",
-            bbox=_LABEL_BG,
+            bbox=label_bg,
         )
 
     kp = tooth.keypoints
@@ -124,25 +138,42 @@ def _draw_tooth(
     # CEJ landmarks (green)
     for cej in (kp.cej_mesial, kp.cej_distal):
         if cej is not None:
-            ax.plot(cej[0], cej[1], "o", color=_CEJ_DOT, markersize=3)
+            ax.plot(cej[0], cej[1], "o", color=_CEJ_DOT, markersize=marker_size,
+                    markeredgecolor="black", markeredgewidth=0.5)
 
     # Bone-crest landmarks (red)
     for crest in (kp.bone_crest_mesial, kp.bone_crest_distal):
         if crest is not None:
-            ax.plot(crest[0], crest[1], "o", color=_CREST_DOT, markersize=3)
+            ax.plot(crest[0], crest[1], "o", color=_CREST_DOT, markersize=marker_size,
+                    markeredgecolor="black", markeredgewidth=0.5)
+
+    # Apex landmark (purple)
+    if kp.apex is not None:
+        ax.plot(kp.apex[0], kp.apex[1], "o", color=_APEX_DOT, markersize=marker_size,
+                markeredgecolor="black", markeredgewidth=0.5)
 
     # CEJ→bone-crest segments per site, color-coded by tier
-    _draw_site_segment(ax, tooth, "mesial", kp.cej_mesial, kp.bone_crest_mesial, low_conf)
-    _draw_site_segment(ax, tooth, "distal", kp.cej_distal, kp.bone_crest_distal, low_conf)
+    _draw_site_segment(ax, tooth, "mesial", kp.cej_mesial, kp.bone_crest_mesial,
+                       low_conf, font_scale, fs_pct, line_w, label_bg)
+    _draw_site_segment(ax, tooth, "distal", kp.cej_distal, kp.bone_crest_distal,
+                       low_conf, font_scale, fs_pct, line_w, label_bg)
+
+    # Caries lesions (cyan)
+    for car in tooth.caries:
+        _draw_caries(ax, tooth.fdi, car, low_conf, font_scale, fs_label, label_bg)
 
 
 def _draw_site_segment(
     ax: plt.Axes,
     tooth: ToothFinding,
     surface: str,
-    cej: Optional[Tuple[float, float, float]],
-    crest: Optional[Tuple[float, float, float]],
+    cej,
+    crest,
     low_conf: Set[Tuple[str, Optional[str]]],
+    font_scale: float,
+    fs_pct: float,
+    line_w: float,
+    label_bg: dict,
 ) -> None:
     """Draw the CEJ→bone-crest segment + % label for one site."""
     if cej is None or crest is None:
@@ -158,20 +189,17 @@ def _draw_site_segment(
         [cej[0], crest[0]],
         [cej[1], crest[1]],
         color=color,
-        linewidth=1.5,
+        linewidth=line_w,
         linestyle=linestyle,
     )
 
     if site and site.pct is not None:
-        # Vertical defect → hatched fill banner; horizontal → solid alpha.
         if tooth.pattern == "angular_vertical":
             hatch = "//"
         else:
             hatch = None
-        # Small filled marker behind the % label so doctors get a
-        # pattern cue even on tiny segments.
         midx, midy = (cej[0] + crest[0]) / 2.0, (cej[1] + crest[1]) / 2.0
-        pad = 6
+        pad = 8 * font_scale
         ax.add_patch(Rectangle(
             (midx - pad, midy - pad),
             pad * 2,
@@ -182,12 +210,54 @@ def _draw_site_segment(
             edgecolor="none",
         ))
         ax.text(
-            midx + 7,
+            midx + 10 * font_scale,
             midy,
             f"{site.pct:.0f}%",
-            bbox=_LABEL_BG,
-            **_LABEL_FONT,
+            color="white",
+            fontsize=fs_pct,
+            family="monospace",
+            bbox=label_bg,
         )
+
+
+def _draw_caries(
+    ax: plt.Axes,
+    tooth_fdi: str,
+    caries: CariesFinding,
+    low_conf: Set[Tuple[str, Optional[str]]],
+    font_scale: float,
+    fs_label: float,
+    label_bg: dict,
+) -> None:
+    """Draw a caries lesion bbox + depth/surface label."""
+    if caries.bbox is None:
+        return
+    x1, y1, x2, y2 = caries.bbox
+    is_low = _site_is_low_confidence(tooth_fdi, caries.surface, low_conf)
+    linestyle = "--" if is_low else "-"
+
+    ax.add_patch(Rectangle(
+        (x1, y1),
+        x2 - x1,
+        y2 - y1,
+        fill=False,
+        edgecolor=_CARIES_EDGE,
+        linewidth=1.5 * font_scale,
+        linestyle=linestyle,
+    ))
+    label = f"#{tooth_fdi} {caries.surface} {caries.depth}"
+    if caries.confidence is not None and caries.confidence > 0:
+        label += f" ({caries.confidence:.0%})"
+    ax.text(
+        x1 + 3,
+        y2 - 4,
+        label,
+        color="white",
+        fontsize=fs_label,
+        family="monospace",
+        bbox=dict(facecolor=_CARIES_EDGE, alpha=0.85, pad=2.0, edgecolor="none"),
+        verticalalignment="bottom",
+    )
 
 
 def _summary_banner(result: AnalysisResult) -> str:
@@ -215,7 +285,13 @@ def render_annotated(
     result: AnalysisResult,
     out_path: Path,
 ) -> Path:
-    """Render a side-by-side annotated PNG to ``out_path``.
+    """Render a full-resolution annotated PNG to ``out_path``.
+
+    The output PNG matches the input image's pixel dimensions exactly,
+    with overlays drawn on top. No side-by-side original reference panel
+    — doctors verifying findings already see the source radiograph in
+    their PMS, and the previous side-by-side rendering halved the usable
+    resolution for evaluating keypoint placement.
 
     Parameters
     ----------
@@ -236,37 +312,35 @@ def render_annotated(
 
     height, width = image.shape[0], image.shape[1]
     low_conf = _low_conf_set(result.low_confidence_findings)
+    font_scale = _font_scale(height)
 
-    # Two-panel figure: clean | annotated.
-    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-    for ax in axes:
-        ax.imshow(image)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_xlim(0, width)
-        ax.set_ylim(height, 0)  # image coords: y grows downward
+    # Figure sized so figsize × DPI == image pixel dimensions.
+    fig = plt.figure(figsize=(width / _RENDER_DPI, height / _RENDER_DPI), dpi=_RENDER_DPI)
+    ax = fig.add_axes([0, 0, 1, 1])  # full-bleed; no margin
+    ax.imshow(image, aspect="equal")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlim(0, width)
+    ax.set_ylim(height, 0)  # image coords: y grows downward
+    ax.set_axis_off()
 
-    axes[0].set_title("original", fontsize=8)
-    axes[1].set_title("annotated", fontsize=8)
-
-    # Summary banner above the annotated panel.
+    # Summary banner at top of image.
     banner = _summary_banner(result)
-    axes[1].text(
-        4,
-        12,
+    ax.text(
+        6,
+        6,
         banner,
-        bbox=_LABEL_BG,
+        bbox=dict(facecolor="black", alpha=0.7, pad=3.0, edgecolor="none"),
         color="white",
-        fontsize=7,
+        fontsize=9 * font_scale,
         family="monospace",
         verticalalignment="top",
     )
 
-    # Draw all teeth.
+    # Draw all teeth (bbox + keypoints + severity segments + caries).
     for tooth in result.teeth:
-        _draw_tooth(axes[1], tooth, low_conf)
+        _draw_tooth(ax, tooth, low_conf, font_scale)
 
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=_RENDER_DPI, pad_inches=0)
     plt.close(fig)
     return out_path
