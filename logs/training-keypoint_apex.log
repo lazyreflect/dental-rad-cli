@@ -1,0 +1,29 @@
+2026-05-11 21:39:52,366 INFO training keypoint model: landmark=apex device=cuda
+2026-05-11 21:40:58,023 INFO epoch   1/200  train_loss=7.2758  val_loss=6.3197  patience=0/20
+2026-05-11 21:42:03,608 INFO epoch   2/200  train_loss=5.6978  val_loss=5.2876  patience=0/20
+2026-05-11 21:43:10,954 INFO epoch   3/200  train_loss=4.9223  val_loss=5.2754  patience=0/20
+2026-05-11 21:44:18,526 INFO epoch   4/200  train_loss=4.5586  val_loss=4.8040  patience=0/20
+2026-05-11 21:45:25,745 INFO epoch   5/200  train_loss=4.1155  val_loss=4.8348  patience=0/20
+2026-05-11 21:46:34,527 INFO epoch   6/200  train_loss=3.9175  val_loss=4.7976  patience=1/20
+2026-05-11 21:47:43,056 INFO epoch   7/200  train_loss=3.6012  val_loss=4.9120  patience=0/20
+2026-05-11 21:48:52,651 INFO epoch   8/200  train_loss=3.4498  val_loss=4.8182  patience=1/20
+2026-05-11 21:50:01,715 INFO epoch   9/200  train_loss=3.3102  val_loss=5.0367  patience=2/20
+2026-05-11 21:51:11,379 INFO epoch  10/200  train_loss=3.1385  val_loss=5.2349  patience=3/20
+2026-05-11 21:52:22,158 INFO epoch  11/200  train_loss=2.9884  val_loss=5.1510  patience=4/20
+2026-05-11 21:53:32,902 INFO epoch  12/200  train_loss=2.8864  val_loss=5.4120  patience=5/20
+2026-05-11 21:54:43,161 INFO epoch  13/200  train_loss=2.6729  val_loss=6.0581  patience=6/20
+2026-05-11 21:55:54,127 INFO epoch  14/200  train_loss=2.6608  val_loss=5.5713  patience=7/20
+2026-05-11 21:57:05,356 INFO epoch  15/200  train_loss=2.5429  val_loss=5.6032  patience=8/20
+2026-05-11 21:58:16,662 INFO epoch  16/200  train_loss=2.4778  val_loss=5.6517  patience=9/20
+2026-05-11 21:59:27,806 INFO epoch  17/200  train_loss=2.3943  val_loss=6.1378  patience=10/20
+2026-05-11 22:00:38,976 INFO epoch  18/200  train_loss=2.3951  val_loss=6.2725  patience=11/20
+2026-05-11 22:01:50,747 INFO epoch  19/200  train_loss=2.3548  val_loss=5.0687  patience=12/20
+2026-05-11 22:03:03,025 INFO epoch  20/200  train_loss=2.1525  val_loss=6.1456  patience=13/20
+2026-05-11 22:04:15,654 INFO epoch  21/200  train_loss=2.1731  val_loss=5.9890  patience=14/20
+2026-05-11 22:05:27,823 INFO epoch  22/200  train_loss=2.1205  val_loss=6.7698  patience=15/20
+2026-05-11 22:06:40,214 INFO epoch  23/200  train_loss=2.0876  val_loss=5.8310  patience=16/20
+2026-05-11 22:07:52,829 INFO epoch  24/200  train_loss=2.0562  val_loss=6.4660  patience=17/20
+2026-05-11 22:09:08,920 INFO epoch  25/200  train_loss=1.9835  val_loss=6.5806  patience=18/20
+2026-05-11 22:10:21,033 INFO epoch  26/200  train_loss=1.9341  val_loss=6.8009  patience=19/20
+2026-05-11 22:10:21,033 INFO early stopping at epoch 26 (patience exhausted)
+saved: C:\Users\13038\repos\dental-rad-cli\weights\keypoint_apex.pt

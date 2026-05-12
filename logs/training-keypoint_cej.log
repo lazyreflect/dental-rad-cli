@@ -1,0 +1,31 @@
+2026-05-11 19:50:00,777 INFO training keypoint model: landmark=cej device=cuda
+Downloading: "https://download.pytorch.org/models/resnet50-11ad3fa6.pth" to C:\Users\13038/.cache\torch\hub\checkpoints\resnet50-11ad3fa6.pth
+  0%|          | 0.00/97.8M [00:00<?, ?B/s] 20%|#9        | 19.4M/97.8M [00:00<00:00, 203MB/s] 42%|####1     | 41.0M/97.8M [00:00<00:00, 216MB/s] 65%|######4   | 63.1M/97.8M [00:00<00:00, 223MB/s] 90%|########9 | 88.0M/97.8M [00:00<00:00, 237MB/s]100%|##########| 97.8M/97.8M [00:00<00:00, 225MB/s]
+2026-05-11 19:51:29,789 INFO epoch   1/200  train_loss=5.8717  val_loss=4.7856  patience=0/20
+2026-05-11 19:53:00,043 INFO epoch   2/200  train_loss=4.3495  val_loss=4.4064  patience=0/20
+2026-05-11 19:54:45,816 INFO epoch   3/200  train_loss=3.9076  val_loss=3.9875  patience=0/20
+2026-05-11 19:56:38,940 INFO epoch   4/200  train_loss=3.6320  val_loss=4.2037  patience=0/20
+2026-05-11 19:58:44,870 INFO epoch   5/200  train_loss=3.4514  val_loss=3.9074  patience=1/20
+2026-05-11 20:00:29,847 INFO epoch   6/200  train_loss=3.2332  val_loss=3.9024  patience=0/20
+2026-05-11 20:02:08,671 INFO epoch   7/200  train_loss=3.1174  val_loss=3.9466  patience=0/20
+2026-05-11 20:04:27,278 INFO epoch   8/200  train_loss=3.0004  val_loss=4.0618  patience=1/20
+2026-05-11 20:06:25,387 INFO epoch   9/200  train_loss=2.9056  val_loss=4.0650  patience=2/20
+2026-05-11 20:07:51,426 INFO epoch  10/200  train_loss=2.7047  val_loss=4.4303  patience=3/20
+2026-05-11 20:09:36,596 INFO epoch  11/200  train_loss=2.6261  val_loss=4.1156  patience=4/20
+2026-05-11 20:11:25,711 INFO epoch  12/200  train_loss=2.5344  val_loss=4.6788  patience=5/20
+2026-05-11 20:13:21,049 INFO epoch  13/200  train_loss=2.4358  val_loss=4.1322  patience=6/20
+2026-05-11 20:15:03,835 INFO epoch  14/200  train_loss=2.2824  val_loss=4.9106  patience=7/20
+2026-05-11 20:17:22,751 INFO epoch  15/200  train_loss=2.2427  val_loss=4.7148  patience=8/20
+2026-05-11 20:19:10,515 INFO epoch  16/200  train_loss=2.1367  val_loss=5.1457  patience=9/20
+2026-05-11 20:21:01,305 INFO epoch  17/200  train_loss=2.0742  val_loss=5.2541  patience=10/20
+2026-05-11 20:22:42,155 INFO epoch  18/200  train_loss=2.0018  val_loss=4.9723  patience=11/20
+2026-05-11 20:24:24,515 INFO epoch  19/200  train_loss=1.8945  val_loss=5.7499  patience=12/20
+2026-05-11 20:26:06,549 INFO epoch  20/200  train_loss=1.8406  val_loss=5.0461  patience=13/20
+2026-05-11 20:27:37,135 INFO epoch  21/200  train_loss=1.8086  val_loss=5.8604  patience=14/20
+2026-05-11 20:29:06,232 INFO epoch  22/200  train_loss=1.8086  val_loss=5.4564  patience=15/20
+2026-05-11 20:30:47,987 INFO epoch  23/200  train_loss=1.6635  val_loss=5.7530  patience=16/20
+2026-05-11 20:32:32,339 INFO epoch  24/200  train_loss=1.6547  val_loss=5.6655  patience=17/20
+2026-05-11 20:34:42,543 INFO epoch  25/200  train_loss=1.6555  val_loss=5.1455  patience=18/20
+2026-05-11 20:36:36,031 INFO epoch  26/200  train_loss=1.6532  val_loss=5.4951  patience=19/20
+2026-05-11 20:36:36,031 INFO early stopping at epoch 26 (patience exhausted)
+saved: C:\Users\13038\repos\dental-rad-cli\weights\keypoint_cej.pt

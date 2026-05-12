@@ -1,0 +1,32 @@
+{
+  "schema_version": "0.1",
+  "image": {
+    "path": "bw03.png",
+    "width": 999,
+    "height": 782,
+    "type": "unknown"
+  },
+  "teeth": [],
+  "summary": {
+    "bone_loss_pattern": "unknown",
+    "vertical_defects": [],
+    "caries_findings": [],
+    "quadrants": []
+  },
+  "low_confidence_findings": [],
+  "note_draft": "Radiograph demonstrate unknown bone loss.",
+  "metadata": {
+    "models": {
+      "tooth_detect": "tooth_detect",
+      "keypoint_cej": "keypoint_cej",
+      "keypoint_bone": "keypoint_bone",
+      "keypoint_apex": "keypoint_apex",
+      "segmentation_tooth": "segmentation_tooth",
+      "segmentation_bone": "segmentation_bone"
+    },
+    "runtime_seconds": 0.013,
+    "device": "cpu",
+    "schema_version": "0.1",
+    "dry_run": false
+  }
+}
