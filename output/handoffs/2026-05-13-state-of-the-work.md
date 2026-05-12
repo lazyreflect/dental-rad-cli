@@ -24,7 +24,9 @@ The cross-host drift (0.3051 vs 0.3071) is fp rounding noise. Pin **pickles-CUDA
 - **Parallel substrate work in flight:** `~/repos/work/dental-tooth-numbering/` (new repo). Phase 1 (research + architecture jam) running in a sister Claude session. Will provide FDI/Universal tooth numbering as a workspace substrate consumed by dental-rad-cli (immediate), NoteBrusher, DDE, curve-genie, eob-ingest. Does NOT block polyline pivot — independent training, data, eval.
 - **Joseph annotation deferred for v0.** Eval anchors entirely to DenPAR test split. Office-distribution validation revisited after polyline architecture is locked.
 
-**First action for next session:** write `scripts/eval_cej_polyline.py` with the three real metrics (per-site y-error, CEJ-band IoU, polyline-degenerate rate), report in mm using per-tooth-class calibration. Run on current Keypoint R-CNN outputs to establish the baseline number that the polyline pivot will be measured against. ~200 lines.
+**First action for next session:** ~~write `scripts/eval_cej_polyline.py`~~ **DONE (2026-05-12 evening, commit `<see git log>`).** Baseline measured: per-site y-error median 0.31 mm (8.89 px), p90 1.5 mm (41.9 px), `cej_collapse_rate` 0.3071. **Surprise:** y-error already in commercial range (Overjet 0.3 mm; Adravision 0.434 mm; AlGhaihab 0.499 mm). The polyline pivot's value isn't "reduce y-error" — it's **enabling per-site mesial/distal differentiation** that x-collapse currently breaks. See "Benchmarks we're competing against" and "Numbers to track" sections below.
+
+**Next action:** build the polyline adapter (`build_yolo_cej_polyline_dataset()` in `denpar_adapter.py`) with y-band clustering + 30-px buffer. ~150 lines.
 
 ## Three structural corrections from external review (load-bearing — carried from v1)
 
@@ -275,18 +277,64 @@ Real issues, documented so they're not lost, but not the polyline-pivot path's r
 - **The autoresearch unit at `autoresearch/cej-collapse/`** is parked. Could be useful later to optimize polyline hyperparameters once architecture is locked.
 - **GCP cloud GPU setup** under `scripts/cloud/` is partially functional but unused — pickles via SSH is the host now. Available as fallback if pickles unavailable.
 
+## Benchmarks we're competing against
+
+Two tiers — academic peer-reviewed and commercial FDA-cleared. The commercial tier is the real bar for any clinically-shippable claim.
+
+### Academic tier
+
+| Paper | Year | Modality | Headline | Code/Data | Our relevance |
+|---|---|---|---|---|---|
+| **AlGhaihab / Denti.AI** ([Diagnostics 15:576](https://pmc.ncbi.nlm.nih.gov/articles/PMC11899607/)) | 2025 | BW + PA | **BW MAE 0.499 mm** CEJ→bone-crest; PA Acc 81% | Neither released | Primary academic anchor for Family A |
+| **Banks et al. perio-KPT** ([arxiv 2503.13477](https://arxiv.org/abs/2503.13477)) | 2025 | PA | **PRCK 0.91+** on keypoints | MIT code; Zenodo restricted | Inaccessible. PRCK ≠ our y-error |
+| **Lee / Columbia 5-network** (BMC Oral Health 2025) | 2025 | BW only | **94% acc**, 82-87% severe (vs 68% dentists) | Neither released | Family B reference; AUC ceiling |
+| **Erturk** (J Imaging Inform Med 2024) | 2024 | BW | **83.45% acc** on 4-class AAP stage | Not released | Family C (classifier-only) ceiling |
+| **Akarsu** (Diagnostics 16:322) | 2026 | BW | **F1 0.88** on bone-loss region | Not released | Family D (region segmentation) |
+| **Lee / Kabir / Jiang** ([arxiv 2109.12115](https://arxiv.org/abs/2109.12115)) | 2022 | PA | **DSC > 0.91** on CEJ band; RBL stage AUC 0.89-0.90 | Architecture only | **Polyline architecture reference** |
+| **Wimalasiri** ([arxiv 2506.20522](https://arxiv.org/abs/2506.20522)) | 2026 | PA only | 87% H-vs-V pattern | Unlicensed | Our DenPAR-trained baseline (cleanroom-reimplemented) |
+
+### Commercial tier — FDA 510(k) filings (high confidence)
+
+Aggregator source: [PMC12775797 — FDA-Approved AI Solutions in Dental Imaging](https://pmc.ncbi.nlm.nih.gov/articles/PMC12775797/) (narrative review of FDA filings).
+
+| Vendor | Clearance # | BW MAE | PA MAE | BW Sens/Spec | PA Sens/Spec |
+|---|---|---|---|---|---|
+| **Overjet Dental Assist** | K210187 | **0.3 mm** (pooled, press citation) | (pooled) | — | — |
+| **Adravision Perio** | K232440 | **0.434 mm** | **0.504 mm** | 90.7% / 94.3% | 92.5% / 86.8% |
+| **Pearl Second Opinion BLE** | K243230 | 0.86 mm | **0.45 mm** | — | — |
+| **VideaHealth Perio Assist** | K223296 | <1.5 mm | <1.5 mm | 92.8% / 89.4% | 88.3% / 87.0% |
+| **Denti.AI Detect** | (US-cleared 2023) | — | — | 65% / 90% (AlGhaihab eval) | 76% / 86% (AlGhaihab eval) |
+
+### Our success criteria, anchored to the commercial bar
+
+- **v0 polyline pivot (CEJ landmark only):** match Lee/Kabir 2022 DSC trajectory on CEJ band IoU (target > 0.50 v0, stretch > 0.90). Hold per-site y-error median ≤ 0.5 mm.
+- **v0.5+ Family A math head (CEJ + bone-crest → mm distance):** target ≤ 0.5 mm MAE on full CEJ→bone-crest distance (Adravision/AlGhaihab range). Stretch: ≤ 0.3 mm (Overjet range).
+- **v1 per-image AAP stage classification:** target ≥ 90% sensitivity at ≥ 85% specificity (Adravision / Videa range).
+
+### Important framing — y-error vs mm-MAE distinction
+
+Our per-site y-error metric measures the **CEJ landmark only on the y-axis**. The commercial MAE numbers measure the **full mm CEJ→bone-crest distance**, which combines two landmark errors projected onto the tooth long axis. They are NOT directly comparable.
+
+If both CEJ and bone-crest landmarks have ~0.3 mm independent y-error, the combined mm distance MAE is approximately `sqrt(2) * 0.3 ≈ 0.42 mm`. So matching the commercial bar on CEJ y-error alone is necessary but not sufficient — the combined output gets evaluated after Family A math composes both landmarks.
+
+Future cold-pickup sessions: do not celebrate "0.3 mm y-error matches Overjet" — they are different metrics on different problems.
+
 ## Numbers to track in the next session
 
-| Metric | Baseline (current Keypoint R-CNN) | Polyline pivot target | Published anchor |
+| Metric | Baseline (Keypoint R-CNN, n=200 PAs, 1122 sites) | Polyline pivot target | Published anchor |
 |---|---|---|---|
-| **per-site y-error median (mm)** (PRIMARY) | TBD — compute on current outputs first | < 1.0 mm | AlGhaihab 2025 MAE 0.499 mm (BW) |
-| **per-site y-error p90 (mm)** | TBD | < 3.0 mm | AAP threshold = 2 mm |
-| **per-site y-error median (px)** (sibling) | TBD | < 15 px | |
-| **per-site y-error p90 (px)** | TBD | < 40 px | |
-| **CEJ-band pixel IoU** | TBD | > 0.50 | Lee/Kabir 2022 DSC > 0.91 (stretch) |
-| **polyline-degenerate rate** | n/a (no polyline output today) | < 5% | n/a |
-| `cej_collapse_rate` (sanity check) | 0.3051 | ~0 by construction | n/a |
-| `caries_map50` (val n=58, control) | 0.6478 | unchanged (don't touch caries) | Salehizeinabadi 2025 |
+| **per-site y-error median (mm)** (PRIMARY) | **0.31 mm** | ≤ 0.50 mm | AlGhaihab BW MAE 0.499 mm; Adravision 0.434 mm; Overjet 0.3 mm |
+| **per-site y-error p90 (mm)** | **1.5 mm** | ≤ 1.0 mm | AAP threshold = 2 mm; tail reduction is the real win |
+| **per-site y-error median (px)** (sibling) | 8.89 px | ≤ 15 px | — |
+| **per-site y-error p90 (px)** | 41.9 px | ≤ 40 px | — |
+| **CEJ-band pixel IoU** | n/a (keypoints, no band) | > 0.50 | Lee/Kabir 2022 DSC > 0.91 (stretch) |
+| **polyline-degenerate rate** | n/a | < 5% | — |
+| `cej_collapse_rate` (sanity check) | 0.3071 | ~0 by construction | — |
+| `caries_map50` (val n=58, control) | 0.6478 | unchanged | Salehizeinabadi 2025 |
+
+**Surprise from baseline measurement** (2026-05-12 evening): the y-error median of 0.31 mm on the existing Keypoint R-CNN is already in commercial range. The polyline pivot's primary value is not "reduce y-error" — it's **enabling per-site mesial/distal differentiation** that the current x-collapse problem breaks. Family A math needs CEJ at distinct mesial and distal sites; x-collapse gives one site, not two. Polyline endpoints come from intersecting the predicted band at `bbox.x1` and `bbox.x2`, which are distinct by construction.
+
+The real headline-metric win to look for in the polyline retrain: **p90 reduction** (currently 1.5 mm — the heavy tail captures collapse cases dragging mm distance math into wrong AAP-stage territory). Polyline band averages out per-tooth noise across the arch and should compress the tail toward 0.7-1.0 mm.
 
 ## The concrete first action
 
@@ -316,3 +364,5 @@ The total work to first measurable result is probably 6-10 hours of Claude time,
 *v1 corrections from external review (other Claude) baked in: y-band clustering not bbox-anchored pairing (Correction 1), 30-px buffer not 2-px (Correction 2), new primary metrics not `cej_collapse_rate` (Correction 3).*
 
 *v2 reframes from Joseph conversation 2026-05-12 baked in: Family A primary (apex-free, both modalities), apex head deletion, px→mm calibration via tooth-class priors, parallel `dental-tooth-numbering` substrate work, Joseph annotation deferred, Q5 dissolved into post-retrain empirical review, BW/PA symmetry confirmed.*
+
+*v2.1 additions (2026-05-12 evening): new "Benchmarks we're competing against" section with academic + FDA-cleared commercial tiers (Overjet K210187 0.3 mm pooled, Adravision K232440 0.434/0.504 mm, Pearl K243230 0.86/0.45 mm, VideaHealth K223296 <1.5 mm). `scripts/eval_cej_polyline.py` shipped; baseline measured at per-site y-error median 0.31 mm — already in commercial range. Real polyline pivot win: p90 reduction (1.5 → 0.7-1.0 mm target) and per-site mesial/distal differentiation enabling Family A math. Y-error vs mm-MAE distinction documented to prevent future framing errors.*
