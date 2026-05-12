@@ -248,29 +248,52 @@ def _bone_crest_for_bbox(
     bbox: tuple[float, float, float, float],
     bone_lines: list[list[tuple[float, float]]],
 ) -> tuple[tuple[float, float] | None, tuple[float, float] | None]:
-    """Derive a (left, right) bone-crest keypoint pair for one tooth.
+    """Derive (mesial, distal) bone-crest keypoints for one tooth.
 
-    For each bone polyline, take its two endpoints (first and last
-    vertex). Keep endpoints that lie inside the tooth bbox; if none
-    do, take the endpoint closest to the bbox center across all
-    polylines. Then sort the surviving 0-2 points left-to-right.
+    DenPAR v3 has NO discrete bone-crest keypoints — only polylines
+    tracing the alveolar bone crest level across the whole radiograph.
+    The clinically meaningful bone-crest landmark for a tooth is at
+    the mesial and distal interproximal sites (i.e. at the tooth bbox's
+    left and right edges), NOT at the polyline endpoints (the prior
+    v3-era heuristic that produced misleading training labels).
+
+    Strategy: linearly interpolate each polyline segment at
+    ``x = bbox.x1`` (mesial) and ``x = bbox.x2`` (distal). If multiple
+    polylines cover the same x (rare but possible when both jaws are
+    visible), prefer the most coronal one — closer to the CEJ — by
+    taking the smallest y (image origin is top-left).
+
+    Returns ``(mesial_point, distal_point)`` with either / both as
+    ``None`` if no polyline covers the corresponding bbox edge.
     """
-    candidates: list[tuple[float, float]] = []
-    for line in bone_lines:
-        if not line:
-            continue
-        candidates.append(tuple(line[0]))  # type: ignore[arg-type]
-        if len(line) > 1:
-            candidates.append(tuple(line[-1]))  # type: ignore[arg-type]
+    x1, _y1, x2, _y2 = bbox
 
-    inside = [p for p in candidates if _point_in_bbox(p, bbox)]
-    if inside:
-        return _sort_pair_left_right(inside)
+    def interp_y_at_x(target_x: float) -> float | None:
+        """Linearly interpolate any covering polyline at ``target_x``."""
+        candidates: list[float] = []
+        for line in bone_lines:
+            for (xa, ya), (xb, yb) in zip(line, line[1:]):
+                lo, hi = (xa, xb) if xa <= xb else (xb, xa)
+                if lo <= target_x <= hi:
+                    if xa == xb:
+                        # Vertical segment — both vertices share x;
+                        # take the more coronal (smaller y).
+                        candidates.append(float(min(ya, yb)))
+                    else:
+                        t = (target_x - xa) / (xb - xa)
+                        candidates.append(float(ya + t * (yb - ya)))
+                    break  # only first matching segment per polyline
+        if not candidates:
+            return None
+        # Most coronal point wins (smallest y in image coords).
+        return min(candidates)
 
-    if not candidates:
-        return None, None
-    nearest = min(candidates, key=lambda p: _dist_point_to_bbox_center(p, bbox))
-    return _sort_pair_left_right([nearest])
+    mesial_y = interp_y_at_x(x1)
+    distal_y = interp_y_at_x(x2)
+
+    mesial = (x1, mesial_y) if mesial_y is not None else None
+    distal = (x2, distal_y) if distal_y is not None else None
+    return mesial, distal
 
 
 def _pair_with_visibility(
@@ -400,30 +423,137 @@ def _mask_polygons_for_image(
     return polygons
 
 
+def _bone_polygons_for_image(
+    split_root: Path, stem: str
+) -> list[list[tuple[float, float]]]:
+    """Synthesize bone-region polygons from the DenPAR v3 polylines.
+
+    DenPAR v3 has NO bone region masks anywhere. The
+    ``Masks (Radiograph-wise)/`` folder (which the v2-era pipeline
+    treated as the bone mask) actually contains all-teeth-as-one-mask
+    in v3 — verified by visual inspection. This was Subagent F's
+    silent miss at hour-0; the overnight ``segmentation_bone.pt`` is
+    structurally a duplicate of ``segmentation_tooth.pt`` as a result.
+
+    Correct source: ``Bone Level Annotations/<stem>.json`` containing
+    one or more polylines along the alveolar bone crest. Many BWs
+    have multiple polylines at disjoint x ranges (one per bone-crest
+    segment where bone is annotatable). We synthesize one polygon per
+    disjoint strip:
+
+    1. Load the polylines.
+    2. Buffer each by ±``_BONE_STRIP_HALF_WIDTH`` px.
+    3. Union overlapping strips, keep disjoint strips as separate
+       polygons.
+    4. Return ALL resulting polygons (caller emits each as a YOLO-seg
+       instance).
+
+    Returns ``[]`` if no polylines are present or all buffers fail.
+    """
+    p = split_root / "Bone Level Annotations" / f"{stem}.json"
+    if not p.is_file():
+        return []
+    import json
+    try:
+        data = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return []
+    bone_lines = data.get("Bone_Lines") or []
+    return _bone_polygons_from_polylines(bone_lines)
+
+
+# Backward-compatibility alias retained briefly for tests that may
+# still import the old name. Deprecated — call _bone_polygons_for_image.
 def _bone_polygon_for_image(
     split_root: Path, stem: str
 ) -> list[tuple[float, float]] | None:
-    """Extract a single bone polygon from the radiograph-wise mask.
+    polys = _bone_polygons_for_image(split_root, stem)
+    if not polys:
+        return None
+    # Return the largest (preserves old caller semantics).
+    return max(polys, key=lambda p: len(p))
 
-    The Radiograph-wise mask is one binary PNG per image. Returns the
-    largest contour as an absolute-pixel polygon, or None if missing.
+
+# Width of the bone-crest strip generated by polyline buffering.
+# Tighter values give the model a more precise localization signal
+# but risk training instability if the polyline geometry is jagged.
+# 30 px (15 each side) chosen empirically against DenPAR v3 BW samples
+# at ~1100 px tall — covers the trabecular bone region just below the
+# crest line without bleeding into tooth roots.
+_BONE_STRIP_HALF_WIDTH: Final[int] = 15
+
+
+def _bone_polygons_from_polylines(
+    bone_lines: list[list[tuple[float, float]]],
+) -> list[list[tuple[float, float]]]:
+    """Buffer + union polylines into a list of bone-region polygons.
+
+    Uses shapely for buffer + union math. Each polyline becomes a
+    "capsule" strip (rectangle with rounded ends) of width
+    ``2 * _BONE_STRIP_HALF_WIDTH``. Overlapping strips merge; disjoint
+    strips remain as separate polygons in the output list.
+
+    Returns ``[]`` if input is empty / degenerate / produces no valid
+    geometry. Otherwise returns one or more polygons, each as a list
+    of (x, y) exterior coordinates.
     """
-    import cv2
+    if not bone_lines:
+        return []
+    try:
+        from shapely.geometry import LineString, MultiPolygon, Polygon
+        from shapely.ops import unary_union
+    except ImportError:
+        return []
 
-    p = split_root / _SUB_MASKS_RAD / f"{stem}.png"
-    if not p.is_file():
+    strips = []
+    for line in bone_lines:
+        if len(line) < 2:
+            continue
+        try:
+            ls = LineString([(float(x), float(y)) for x, y in line])
+            if not ls.is_valid or ls.is_empty:
+                continue
+            strip = ls.buffer(_BONE_STRIP_HALF_WIDTH)
+            if not strip.is_empty:
+                strips.append(strip)
+        except (TypeError, ValueError):
+            continue
+
+    if not strips:
+        return []
+
+    merged = unary_union(strips)
+
+    # Collect every Polygon in the result (Polygon, MultiPolygon, or
+    # GeometryCollection containing polygons).
+    polygons: list[Polygon] = []
+    if isinstance(merged, Polygon):
+        if not merged.is_empty:
+            polygons.append(merged)
+    elif isinstance(merged, MultiPolygon):
+        for geom in merged.geoms:
+            if isinstance(geom, Polygon) and not geom.is_empty:
+                polygons.append(geom)
+    else:
+        # GeometryCollection or other — extract any Polygons inside.
+        for geom in getattr(merged, "geoms", []):
+            if isinstance(geom, Polygon) and not geom.is_empty:
+                polygons.append(geom)
+
+    return [
+        [(float(x), float(y)) for x, y in p.exterior.coords]
+        for p in polygons
+    ]
+
+
+# Backward-compat alias.
+def _bone_polygon_from_polylines(
+    bone_lines: list[list[tuple[float, float]]],
+) -> list[tuple[float, float]] | None:
+    polys = _bone_polygons_from_polylines(bone_lines)
+    if not polys:
         return None
-    m = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
-    if m is None:
-        return None
-    _, binm = cv2.threshold(m, 127, 255, cv2.THRESH_BINARY)
-    contours, _hier = cv2.findContours(
-        binm, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-    )
-    if not contours:
-        return None
-    largest = max(contours, key=cv2.contourArea)
-    return [(float(pt[0][0]), float(pt[0][1])) for pt in largest]
+    return max(polys, key=lambda p: len(p))
 
 
 # ---------------------------------------------------------------------------
@@ -555,8 +685,12 @@ def build_yolo_dataset(
                             rows.append(row)
 
             else:  # bone_seg
-                poly = _bone_polygon_for_image(split_root, stem)
-                if poly is not None:
+                # v3 polylines often have x-disjoint strips (one per
+                # bone-crest segment where bone is annotatable). Emit
+                # each strip as a separate YOLO-seg instance so the
+                # model learns multi-strip bone topology.
+                polys = _bone_polygons_for_image(split_root, stem)
+                for poly in polys:
                     row = _yolo_seg_row(0, poly, img_w, img_h)
                     if row is not None:
                         rows.append(row)

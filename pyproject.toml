@@ -24,6 +24,8 @@ dependencies = [
   # Dataset download
   "requests>=2.32.0",
   "roboflow>=1.1.0",
+  # Polyline-to-polygon buffer math (DenPAR v3 bone-mask synthesis)
+  "shapely>=2.0.0",
   # PHI scrub helper (if used)
   "pydicom>=3.0.0",
 ]
