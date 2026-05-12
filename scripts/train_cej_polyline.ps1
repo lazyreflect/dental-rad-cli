@@ -38,27 +38,36 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 '' | Set-Content -Path $LogOut
 '' | Set-Content -Path $LogErr
 
-$argList = @(
-    '-u',  # unbuffered stdout — critical for live tailing
-    '-m', 'dental_rad_cli.training.segmentation',
-    '--target', 'cej',
-    '--data', 'data/prepared/yolo_cej_polyline/dataset.yaml',
-    '--out', 'weights/segmentation_cej.pt',
-    '--epochs', $Epochs.ToString()
-)
+# Spawn the process via WMI Win32_Process.Create. This is the canonical
+# Windows pattern for a truly detached, session-independent child
+# process — it survives SSH disconnects, doesn't hold a console, and
+# doesn't depend on the parent PowerShell staying alive.
+#
+# Start-Process with -RedirectStandardOutput silently fails when
+# invoked through an SSH-cmd-PowerShell layer (no interactive console
+# to redirect from). WMI Create avoids this entirely by treating the
+# whole command as a shell line with native redirection.
 
-$proc = Start-Process -FilePath $Python `
-    -ArgumentList $argList `
-    -WorkingDirectory $RepoRoot `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput $LogOut `
-    -RedirectStandardError $LogErr `
-    -PassThru
+$CommandLine = "cmd /c `"`"$Python`" -u -m dental_rad_cli.training.segmentation " +
+    "--target cej " +
+    "--data data/prepared/yolo_cej_polyline/dataset.yaml " +
+    "--out weights/segmentation_cej.pt " +
+    "--epochs $Epochs " +
+    "> `"$LogOut`" 2> `"$LogErr`"`""
+
+$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+    CommandLine = $CommandLine
+    CurrentDirectory = $RepoRoot
+}
+
+if ($result.ReturnValue -ne 0) {
+    throw "Win32_Process.Create failed with return value $($result.ReturnValue)"
+}
 
 # Persist PID for monitoring.
-$proc.Id | Out-File -FilePath $PidFile -Encoding ascii
+$result.ProcessId | Out-File -FilePath $PidFile -Encoding ascii
 
-Write-Host "Started training: PID $($proc.Id)"
+Write-Host "Started training: PID $($result.ProcessId) (detached cmd wrapper)"
 Write-Host "  log:  $LogOut"
 Write-Host "  err:  $LogErr"
 Write-Host "  pid:  $PidFile"
