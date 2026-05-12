@@ -360,8 +360,11 @@ def _run_tooth_detection(
     classes = _to_numpy(boxes.cls).astype(int)
 
     raw: List[Dict[str, Any]] = []
-    # Upstream nc=3: 0=single-rooted, 1=double-rooted, 2=background.
-    # We pre-filter the bg class if it ever appears in predictions.
+    # Trained model class map (verified 2026-05-12 against weights/tooth_detect.pt):
+    #   {0: 'single', 1: 'double'} — nc=2. The upstream paper described
+    #   an nc=3 (single / double / background) variant; our trained
+    #   weights do not include the background class. Unknown class IDs
+    #   are skipped defensively in case a future re-train adds them.
     for i in range(len(xyxy)):
         cls_id = int(classes[i])
         if cls_id == 0:
@@ -369,7 +372,7 @@ def _run_tooth_detection(
         elif cls_id == 1:
             root_class = "double"
         else:
-            # Class 2 (background) — should not appear in predictions; skip.
+            # Unknown class — skip rather than guess.
             continue
         x1, y1, x2, y2 = (float(v) for v in xyxy[i])
         raw.append(
