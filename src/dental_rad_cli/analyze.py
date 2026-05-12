@@ -62,11 +62,13 @@ CLAHE_CLIP_LIMIT: float = 40.0
 CLAHE_TILE_GRID_SIZE: Tuple[int, int] = (8, 8)
 
 # Weights filenames the bundle expects under ``weights/``.
+# v2 Phase 2: keypoint_apex.pt removed. Existing weights/keypoint_apex.pt
+# files on tenant pods become unused; nothing in the inference pipeline
+# loads them. Disk cleanup is a separate maintenance task.
 WEIGHTS_FILES: Dict[str, str] = {
     "tooth_detect": "tooth_detect.pt",
     "keypoint_cej": "keypoint_cej.pt",
     "keypoint_bone": "keypoint_bone.pt",
-    "keypoint_apex": "keypoint_apex.pt",
     "segmentation_tooth": "segmentation_tooth.pt",
     "segmentation_bone": "segmentation_bone.pt",
     "segmentation_cej": "segmentation_cej.pt",
@@ -75,8 +77,8 @@ WEIGHTS_FILES: Dict[str, str] = {
 
 # v2 CEJ polyline pivot: when the trained polyline model has at least
 # this many confident predictions, route CEJ → Family A mm math
-# (apex-free). Below threshold, fall back to the v1 keypoint pathway
-# OR emit "low_model_confidence" findings if both fail. See
+# (apex-free). Below threshold, fall back to the apex-free keypoint
+# pathway OR emit "low_model_confidence" findings if both fail. See
 # output/training-evidence/2026-05-12-karpathy-findings.md for the
 # stratification that picked this threshold (131/200 images at 100%
 # success on the kept set).
@@ -115,10 +117,14 @@ class ModelBundle:
     _tooth_detect: Optional[Any] = None
     _keypoint_cej: Optional[Any] = None
     _keypoint_bone: Optional[Any] = None
-    _keypoint_apex: Optional[Any] = None
     _segmentation_tooth: Optional[Any] = None
     _segmentation_bone: Optional[Any] = None
     _caries: Optional[Any] = None
+    # Note: keypoint_apex deliberately omitted (v2 Phase 2 apex deletion).
+    # WEIGHTS_FILES still lists the entry for backward compat with
+    # existing weights/ directories, but no loader is exposed here and
+    # the inference pipeline never calls into apex math. severity.py's
+    # compute_bone_loss_pct() stays in-tree but is unused at runtime.
 
     def __post_init__(self) -> None:
         self.weights_dir = Path(self.weights_dir)
@@ -209,7 +215,6 @@ class ModelBundle:
     _LANDMARK_DEFAULT_KP: ClassVar[Dict[str, int]] = {
         "keypoint_cej": 2,
         "keypoint_bone": 2,
-        "keypoint_apex": 1,
     }
 
     def _load_kprcnn(self, key: str) -> Any:
@@ -248,11 +253,6 @@ class ModelBundle:
         if self._keypoint_bone is None:
             self._keypoint_bone = self._load_kprcnn("keypoint_bone")
         return self._keypoint_bone
-
-    def get_keypoint_apex(self) -> Any:
-        if self._keypoint_apex is None:
-            self._keypoint_apex = self._load_kprcnn("keypoint_apex")
-        return self._keypoint_apex
 
 
 # ---------------------------------------------------------------------------
@@ -426,7 +426,14 @@ def _run_keypoint_passes(
     detections: List[Dict[str, Any]],
     device: str = "cpu",
 ) -> List[Dict[str, Any]]:
-    """Run CEJ / bone / apex Keypoint-RCNN passes; pair to tooth detections.
+    """Run CEJ + bone Keypoint-RCNN passes; pair to tooth detections.
+
+    v2 Phase 2: apex pathway removed. Apex predictions on DenPAR were
+    unreliable (hug bbox tops, off by 30-100 px from real root tips),
+    biasing the legacy percent-of-root-length math by ±20% even when
+    in frame. Family A apex-free mm math is the v2 replacement. This
+    function only loads CEJ + bone keypoint models for the legacy
+    fallback when the polyline model is not yet trained.
 
     For each tooth in ``detections``, finds the highest-IoU predicted
     instance from each landmark model (IoU threshold 0.3) and extracts
@@ -438,7 +445,6 @@ def _run_keypoint_passes(
             "fdi": str,
             "cej": [(x,y), (x,y)] | None,        # 2 keypoints
             "bone_crest": [(x,y), (x,y)] | None, # 2 keypoints
-            "apex": (x, y) | None,                # 1 keypoint
         }
     """
     if not detections:
@@ -449,7 +455,6 @@ def _run_keypoint_passes(
     landmark_keys = {
         "cej": ("keypoint_cej", bundle.get_keypoint_cej),
         "bone": ("keypoint_bone", bundle.get_keypoint_bone),
-        "apex": ("keypoint_apex", bundle.get_keypoint_apex),
     }
 
     # rgb_clahe is HWC uint8; convert to CHW float32 in [0, 1] (matches
@@ -495,9 +500,8 @@ def _run_keypoint_passes(
             "fdi": det.get("fdi", ""),
             "cej": None,
             "bone_crest": None,
-            "apex": None,
         }
-        for landmark in ("cej", "bone", "apex"):
+        for landmark in ("cej", "bone"):
             best_iou = iou_threshold
             best_inst: Optional[Dict[str, Any]] = None
             for inst in per_landmark_preds.get(landmark, []):
@@ -521,9 +525,6 @@ def _run_keypoint_passes(
                         (float(kp_arr[0, 0]), float(kp_arr[0, 1])),
                         (float(kp_arr[1, 0]), float(kp_arr[1, 1])),
                     ]
-            else:  # apex
-                if kp_arr.shape[0] >= 1:
-                    row["apex"] = (float(kp_arr[0, 0]), float(kp_arr[0, 1]))
         out_rows.append(row)
     return out_rows
 
@@ -724,11 +725,8 @@ def _build_findings_from_stages(
 
     Returns ``(teeth, summary, low_confidence_findings)``.
     """
-    from dental_rad_cli.pipeline.severity import (
-        compute_bone_loss_pct, severity_tier,
-    )
     from dental_rad_cli.pipeline.family_a import (
-        calibrate_px_per_mm, per_tooth_family_a,
+        calibrate_px_per_mm, per_tooth_family_a, severity_tier_mm, site_mm,
     )
     from dental_rad_cli.pipeline.pattern import classify_pattern
     from dental_rad_cli.pipeline.aggregate import (
@@ -766,8 +764,11 @@ def _build_findings_from_stages(
     polyline_below_threshold = (
         polyline_loaded and cej_band_max_conf < CEJ_POLYLINE_CONF_THRESHOLD
     )
+    # px→mm calibration is required by both Family A AND the keypoint
+    # fallback (which now uses mm math too, apex-free). Compute once
+    # per image from the detection bboxes.
     px_per_mm: Optional[float] = None
-    if use_family_a and detections:
+    if detections:
         det_bboxes = [
             tuple(float(c) for c in d["bbox"]) for d in detections
         ]
@@ -823,7 +824,7 @@ def _build_findings_from_stages(
 
         cej_pair = kp_row.get("cej")        # list[(x,y), (x,y)] | None
         bone_pair = kp_row.get("bone_crest")
-        apex_pt = kp_row.get("apex")        # (x, y) | None
+        # apex removed in v2 Phase 2 — Family A is apex-free.
 
         # Per-site bone-loss math.
         mesial_site: Optional[BoneLossSite] = None
@@ -853,12 +854,14 @@ def _build_findings_from_stages(
             # the render layer (which draws CEJ→bone-crest segments
             # between two points) can show mm sites without keypoint
             # predictions. None where the band didn't cross that bbox
-            # edge — render layer falls back gracefully.
-            bx1, _, bx2, _ = det["bbox"]
-            cej_m_y = band_centerline_y_at_x(cej_band, bx1)
-            cej_d_y = band_centerline_y_at_x(cej_band, bx2)
-            bone_m_y = band_centerline_y_at_x(bone_mask, bx1)
-            bone_d_y = band_centerline_y_at_x(bone_mask, bx2)
+            # edge — render layer falls back gracefully. Pass bbox
+            # y-range so cross-frame contamination on BWs is rejected.
+            bx1, by1, bx2, by2 = det["bbox"]
+            bbox_y = (by1, by2)
+            cej_m_y = band_centerline_y_at_x(cej_band, bx1, bbox_y)
+            cej_d_y = band_centerline_y_at_x(cej_band, bx2, bbox_y)
+            bone_m_y = band_centerline_y_at_x(bone_mask, bx1, bbox_y)
+            bone_d_y = band_centerline_y_at_x(bone_mask, bx2, bbox_y)
             family_a_positions = {
                 "cej_mesial": (bx1, cej_m_y) if cej_m_y is not None else None,
                 "cej_distal": (bx2, cej_d_y) if cej_d_y is not None else None,
@@ -883,33 +886,44 @@ def _build_findings_from_stages(
                             )
                         )
 
-        # v1 keypoint pathway: legacy fallback. Only runs when the
-        # polyline model is NOT loaded at all (legacy install). When
-        # polyline IS loaded but below confidence threshold, prefer
-        # "I don't know" over a wrong apex-pathway measurement.
-        if not family_a_emitted and not polyline_below_threshold:
-            if (
-                cej_pair is not None
-                and bone_pair is not None
-                and apex_pt is not None
-            ):
+        # Legacy keypoint pathway (apex-free per v2 Phase 2, now
+        # retired-when-polyline-loaded per v2.5 Tier 4). Runs ONLY when
+        # the polyline model is not installed (legacy tenant pod). When
+        # polyline IS loaded — at any confidence level, AND even if
+        # Family A couldn't measure THIS specific tooth — we prefer
+        # "I don't know" over the keypoint pathway because the keypoint
+        # head has known failure modes that propagate into wrong mm:
+        #   - CEJ x-collapse: both mesial+distal predicted at same x,
+        #     producing tooth-height-wide segments (bw02 tooth #1: 12mm
+        #     across an intact tooth)
+        #   - bone-crest landing on cusps (tooth #2: line goes from CEJ
+        #     to 3rd molar cusp, not crestal bone)
+        # The polyline+Family A path doesn't have these failure modes
+        # but does honestly say "I don't know" on ~17% of images. That's
+        # the v0 ship trade-off.
+        if not family_a_emitted and not polyline_loaded:
+            if cej_pair is not None and bone_pair is not None and px_per_mm:
                 cej_m, cej_d = cej_pair[0], cej_pair[1]
                 bone_m, bone_d = bone_pair[0], bone_pair[1]
-                pct_m = compute_bone_loss_pct(cej_m, bone_m, apex_pt)
-                pct_d = compute_bone_loss_pct(cej_d, bone_d, apex_pt)
+                mm_m = site_mm(cej_m[1], bone_m[1], px_per_mm)
+                mm_d = site_mm(cej_d[1], bone_d[1], px_per_mm)
                 mesial_site = BoneLossSite(
-                    pct=pct_m,
-                    tier=severity_tier(pct_m),
-                    reason=None if pct_m is not None else "incomputable",
+                    pct=None,
+                    tier=severity_tier_mm(mm_m),
+                    reason=None if mm_m is not None else "incomputable",
+                    mm_estimate=mm_m,
                 )
                 distal_site = BoneLossSite(
-                    pct=pct_d,
-                    tier=severity_tier(pct_d),
-                    reason=None if pct_d is not None else "incomputable",
+                    pct=None,
+                    tier=severity_tier_mm(mm_d),
+                    reason=None if mm_d is not None else "incomputable",
+                    mm_estimate=mm_d,
                 )
-                all_sites.append(mesial_site)
-                all_sites.append(distal_site)
-                if pct_m is None:
+                if mesial_site.tier is not None:
+                    all_sites.append(mesial_site)
+                if distal_site.tier is not None:
+                    all_sites.append(distal_site)
+                if mm_m is None:
                     low_confidence.append(
                         LowConfidenceFinding(
                             type="bone_loss",
@@ -918,7 +932,7 @@ def _build_findings_from_stages(
                             reason="incomputable",
                         )
                     )
-                if pct_d is None:
+                if mm_d is None:
                     low_confidence.append(
                         LowConfidenceFinding(
                             type="bone_loss",
@@ -928,13 +942,7 @@ def _build_findings_from_stages(
                         )
                     )
             else:
-                # Neither Family A nor v1 keypoints produced a usable
-                # measurement. Legacy keypoint pathway preserves the
-                # "keypoint / missing_landmarks" code so existing
-                # downstream consumers + tests continue to work.
-                # When polyline gating is the cause, callers handle
-                # that case via the `elif polyline_below_threshold`
-                # branch below.
+                # No keypoints available for this tooth → can't measure.
                 low_confidence.append(
                     LowConfidenceFinding(
                         type="keypoint",
@@ -942,11 +950,11 @@ def _build_findings_from_stages(
                         reason="missing_landmarks",
                     )
                 )
-        elif polyline_below_threshold and not family_a_emitted:
-            # Polyline model is loaded but didn't have enough confidence
-            # on this image. Skip the apex pathway entirely (it would
-            # produce an unreliable measurement) and emit "manual
-            # review recommended" per the karpathy ship strategy.
+        elif not family_a_emitted and polyline_loaded:
+            # Polyline model is loaded but either (a) image-level conf
+            # was below threshold OR (b) the band didn't cover this
+            # tooth's bbox edges. Either way, prefer "I don't know" to
+            # the keypoint pathway's known failure modes (Tier 4).
             low_confidence.append(
                 LowConfidenceFinding(
                     type="bone_loss",
@@ -979,7 +987,7 @@ def _build_findings_from_stages(
                 cej_distal=(cej_pair[1][0], cej_pair[1][1], 1.0) if cej_pair else None,
                 bone_crest_mesial=(bone_pair[0][0], bone_pair[0][1], 1.0) if bone_pair else None,
                 bone_crest_distal=(bone_pair[1][0], bone_pair[1][1], 1.0) if bone_pair else None,
-                apex=(apex_pt[0], apex_pt[1], 1.0) if apex_pt else None,
+                apex=None,  # v2 Phase 2: apex deletion — no more apex predictions
             )
 
         # Pattern classification — requires tooth-mask + bone-mask + at
@@ -1063,12 +1071,21 @@ def _build_findings_from_stages(
                     )
                 )
 
-        # Jaw classification input — CEJ-midpoint y and apex y.
+        # Jaw classification input. v2 Phase 2: apex deleted, so apex_y
+        # is always None. Jaw classifier degrades gracefully — when
+        # apex_y is None for all teeth, classify_jaw returns "unknown".
+        # FDI numbering from the parallel dental-tooth-numbering
+        # substrate will provide jaw inference in v0.5+.
         cej_y: Optional[float] = None
         if cej_pair is not None:
             cej_y = 0.5 * (cej_pair[0][1] + cej_pair[1][1])
-        apex_y: Optional[float] = apex_pt[1] if apex_pt is not None else None
-        tooth_for_jaw.append(ToothWithKeypoints(cej_y=cej_y, apex_y=apex_y))
+        elif family_a_positions is not None:
+            ys = [
+                p[1] for k in ("cej_mesial", "cej_distal")
+                for p in [family_a_positions.get(k)] if p is not None
+            ]
+            cej_y = sum(ys) / len(ys) if ys else None
+        tooth_for_jaw.append(ToothWithKeypoints(cej_y=cej_y, apex_y=None))
 
     # Surface-level unrouted caries.
     for c in unrouted_caries:
@@ -1172,11 +1189,11 @@ def _build_dry_run_result(image_path: Path) -> AnalysisResult:
                 cej_distal=(790.0, 410.0, 0.91),
                 bone_crest_mesial=(655.0, 470.0, 0.88),
                 bone_crest_distal=(785.0, 480.0, 0.87),
-                apex=(720.0, 620.0, 0.90),
+                apex=None,  # v2 Phase 2 apex deletion
             ),
             bone_loss=BoneLossPerSite(
-                mesial=BoneLossSite(pct=18.0, tier="moderate"),
-                distal=BoneLossSite(pct=22.0, tier="moderate"),
+                mesial=BoneLossSite(pct=None, tier="moderate", mm_estimate=3.2),
+                distal=BoneLossSite(pct=None, tier="moderate", mm_estimate=4.1),
             ),
             pattern="horizontal",
         ),
@@ -1191,11 +1208,11 @@ def _build_dry_run_result(image_path: Path) -> AnalysisResult:
                 cej_distal=(570.0, 410.0, 0.89),
                 bone_crest_mesial=(440.0, 510.0, 0.86),
                 bone_crest_distal=(565.0, 460.0, 0.85),
-                apex=(500.0, 620.0, 0.88),
+                apex=None,
             ),
             bone_loss=BoneLossPerSite(
-                mesial=BoneLossSite(pct=32.0, tier="moderate"),
-                distal=BoneLossSite(pct=14.0, tier="mild"),
+                mesial=BoneLossSite(pct=None, tier="moderate", mm_estimate=5.2),
+                distal=BoneLossSite(pct=None, tier="mild", mm_estimate=2.4),
             ),
             pattern="angular_vertical",
         ),
@@ -1228,9 +1245,9 @@ def _build_dry_run_result(image_path: Path) -> AnalysisResult:
             "tooth_detect": "dry-run-stub",
             "keypoint_cej": "dry-run-stub",
             "keypoint_bone": "dry-run-stub",
-            "keypoint_apex": "dry-run-stub",
             "segmentation_tooth": "dry-run-stub",
             "segmentation_bone": "dry-run-stub",
+            "segmentation_cej": "dry-run-stub",
         },
         runtime_seconds=0.0,
         device="cpu",

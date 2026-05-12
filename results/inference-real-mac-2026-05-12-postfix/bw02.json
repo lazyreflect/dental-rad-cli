@@ -1,0 +1,386 @@
+{
+  "schema_version": "0.1",
+  "image": {
+    "path": "bw02.png",
+    "width": 999,
+    "height": 782,
+    "type": "unknown"
+  },
+  "teeth": [
+    {
+      "fdi": "1",
+      "universal": "1",
+      "bbox": [
+        0.0,
+        340.3753356933594,
+        255.17599487304688,
+        728.4813842773438
+      ],
+      "confidence": 0.864,
+      "root_class": "single",
+      "keypoints": {
+        "cej_mesial": [
+          109.94361114501953,
+          445.7760314941406,
+          1.0
+        ],
+        "cej_distal": [
+          111.8969955444336,
+          444.8003234863281,
+          1.0
+        ],
+        "bone_crest_mesial": [
+          0.48783427476882935,
+          603.6412963867188,
+          1.0
+        ],
+        "bone_crest_distal": [
+          261.9670104980469,
+          646.589111328125,
+          1.0
+        ],
+        "apex": [
+          0.4879334568977356,
+          400.418212890625,
+          1.0
+        ]
+      },
+      "bone_loss": {
+        "mesial": {
+          "pct": 34.3,
+          "tier": "severe"
+        },
+        "distal": {
+          "reason": "incomputable"
+        }
+      },
+      "pattern": "unknown",
+      "caries": []
+    },
+    {
+      "fdi": "2",
+      "universal": "2",
+      "bbox": [
+        255.732421875,
+        0.0,
+        621.287353515625,
+        375.5912780761719
+      ],
+      "confidence": 0.548,
+      "root_class": "double",
+      "keypoints": {
+        "cej_mesial": [
+          315.48919677734375,
+          90.1889877319336,
+          1.0
+        ],
+        "cej_distal": [
+          557.8489379882812,
+          149.6649627685547,
+          1.0
+        ],
+        "bone_crest_mesial": [
+          244.1791229248047,
+          1.464800477027893,
+          1.0
+        ],
+        "bone_crest_distal": [
+          578.0714721679688,
+          95.21202850341797,
+          1.0
+        ],
+        "apex": [
+          456.9966125488281,
+          14.160622596740723,
+          1.0
+        ]
+      },
+      "bone_loss": {
+        "mesial": {
+          "reason": "incomputable"
+        },
+        "distal": {
+          "pct": 18.7,
+          "tier": "moderate"
+        }
+      },
+      "pattern": "unknown",
+      "caries": []
+    },
+    {
+      "fdi": "3",
+      "universal": "3",
+      "bbox": [
+        483.9623718261719,
+        430.19110107421875,
+        903.6951293945312,
+        782.0
+      ],
+      "confidence": 0.709,
+      "root_class": "double",
+      "keypoints": {
+        "cej_mesial": [
+          560.839111328125,
+          626.135009765625,
+          1.0
+        ],
+        "cej_distal": [
+          865.5587768554688,
+          700.4030151367188,
+          1.0
+        ],
+        "bone_crest_mesial": [
+          490.83697509765625,
+          660.7181396484375,
+          1.0
+        ],
+        "bone_crest_distal": [
+          904.9264526367188,
+          678.2937622070312,
+          1.0
+        ],
+        "apex": [
+          490.0549011230469,
+          769.8170776367188,
+          1.0
+        ]
+      },
+      "bone_loss": {
+        "mesial": {
+          "pct": 38.7,
+          "tier": "severe"
+        },
+        "distal": {
+          "reason": "incomputable"
+        }
+      },
+      "pattern": "unknown",
+      "caries": []
+    },
+    {
+      "fdi": "4",
+      "universal": "4",
+      "bbox": [
+        564.67333984375,
+        0.0,
+        906.5602416992188,
+        352.01776123046875
+      ],
+      "confidence": 0.528,
+      "root_class": "double",
+      "keypoints": {
+        "cej_mesial": [
+          581.0289916992188,
+          103.88806915283203,
+          1.0
+        ],
+        "cej_distal": [
+          888.8653564453125,
+          140.95611572265625,
+          1.0
+        ],
+        "bone_crest_mesial": [
+          574.4949951171875,
+          85.45994567871094,
+          1.0
+        ],
+        "bone_crest_distal": [
+          908.04248046875,
+          110.853759765625,
+          1.0
+        ],
+        "apex": [
+          756.3385620117188,
+          0.48805326223373413,
+          1.0
+        ]
+      },
+      "bone_loss": {
+        "mesial": {
+          "pct": 1.8,
+          "tier": "mild"
+        },
+        "distal": {
+          "pct": 4.5,
+          "tier": "mild"
+        }
+      },
+      "pattern": "unknown",
+      "caries": []
+    },
+    {
+      "fdi": "5",
+      "universal": "5",
+      "bbox": [
+        566.1143188476562,
+        0.355007529258728,
+        905.9622192382812,
+        351.512451171875
+      ],
+      "confidence": 0.589,
+      "root_class": "single",
+      "keypoints": {
+        "cej_mesial": [
+          581.0289916992188,
+          103.88806915283203,
+          1.0
+        ],
+        "cej_distal": [
+          888.8653564453125,
+          140.95611572265625,
+          1.0
+        ],
+        "bone_crest_mesial": [
+          574.4949951171875,
+          85.45994567871094,
+          1.0
+        ],
+        "bone_crest_distal": [
+          908.04248046875,
+          110.853759765625,
+          1.0
+        ],
+        "apex": [
+          756.3385620117188,
+          0.48805326223373413,
+          1.0
+        ]
+      },
+      "bone_loss": {
+        "mesial": {
+          "pct": 1.8,
+          "tier": "mild"
+        },
+        "distal": {
+          "pct": 4.5,
+          "tier": "mild"
+        }
+      },
+      "pattern": "unknown",
+      "caries": []
+    },
+    {
+      "fdi": "6",
+      "universal": "6",
+      "bbox": [
+        899.248291015625,
+        66.55288696289062,
+        998.9213256835938,
+        345.968505859375
+      ],
+      "confidence": 0.619,
+      "root_class": "single",
+      "keypoints": {
+        "cej_mesial": [
+          911.765869140625,
+          142.49024963378906,
+          1.0
+        ],
+        "cej_distal": [
+          913.7152099609375,
+          143.46510314941406,
+          1.0
+        ],
+        "bone_crest_mesial": [
+          902.569580078125,
+          114.06954193115234,
+          1.0
+        ],
+        "bone_crest_distal": [
+          920.9834594726562,
+          113.09554290771484,
+          1.0
+        ],
+        "apex": [
+          921.1585693359375,
+          64.009765625,
+          1.0
+        ]
+      },
+      "bone_loss": {
+        "mesial": {
+          "pct": 34.3,
+          "tier": "severe"
+        },
+        "distal": {
+          "pct": 38.7,
+          "tier": "severe"
+        }
+      },
+      "pattern": "unknown",
+      "caries": []
+    }
+  ],
+  "summary": {
+    "bone_loss_pattern": "unknown",
+    "aap_stage_estimate": "IV",
+    "jaw_classification": "maxillary",
+    "vertical_defects": [],
+    "caries_findings": [],
+    "quadrants": [
+      {
+        "quadrant": "UR",
+        "n_teeth": 0,
+        "n_mild": 0,
+        "n_moderate": 0,
+        "n_severe": 0
+      },
+      {
+        "quadrant": "UL",
+        "n_teeth": 0,
+        "n_mild": 0,
+        "n_moderate": 0,
+        "n_severe": 0
+      },
+      {
+        "quadrant": "LL",
+        "n_teeth": 0,
+        "n_mild": 0,
+        "n_moderate": 0,
+        "n_severe": 0
+      },
+      {
+        "quadrant": "LR",
+        "n_teeth": 0,
+        "n_mild": 0,
+        "n_moderate": 0,
+        "n_severe": 0
+      }
+    ]
+  },
+  "low_confidence_findings": [
+    {
+      "type": "bone_loss",
+      "tooth": "1",
+      "surface": "distal",
+      "reason": "incomputable"
+    },
+    {
+      "type": "bone_loss",
+      "tooth": "2",
+      "surface": "mesial",
+      "reason": "incomputable"
+    },
+    {
+      "type": "bone_loss",
+      "tooth": "3",
+      "surface": "distal",
+      "reason": "incomputable"
+    }
+  ],
+  "metadata": {
+    "models": {
+      "tooth_detect": "tooth_detect",
+      "keypoint_cej": "keypoint_cej",
+      "keypoint_bone": "keypoint_bone",
+      "keypoint_apex": "keypoint_apex",
+      "segmentation_tooth": "segmentation_tooth",
+      "segmentation_bone": "segmentation_bone",
+      "caries": "caries"
+    },
+    "runtime_seconds": 0.962,
+    "device": "mps",
+    "schema_version": "0.1",
+    "dry_run": false
+  }
+}

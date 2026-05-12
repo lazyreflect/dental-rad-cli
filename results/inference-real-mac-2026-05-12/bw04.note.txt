@@ -1,0 +1,3 @@
+Radiograph demonstrate unknown bone loss, severe (AAP Stage IV), with vertical defects tooth of #6 (~61%), tooth of #8 (~55%).
+
+Low-confidence findings to verify: #1 distal bone_loss, #2 distal bone_loss, #3 mesial bone_loss, #5 distal bone_loss, #7 distal bone_loss, #8 distal bone_loss.

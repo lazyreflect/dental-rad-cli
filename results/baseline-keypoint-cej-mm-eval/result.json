@@ -1,0 +1,38 @@
+{
+  "mode": "keypoint",
+  "device": "mps",
+  "n_images": 200,
+  "n_sites_evaluated": 1122,
+  "n_teeth_with_both_cej": 561,
+  "per_site_y_error_px": {
+    "median": 8.894692382812508,
+    "mean": 18.44603492064994,
+    "p10": 1.9687895263671693,
+    "p25": 4.466785156249983,
+    "p75": 18.186640869140632,
+    "p90": 41.867292712402346
+  },
+  "per_site_y_error_mm": {
+    "median": 0.30677027544357993,
+    "mean": 0.6550940014905033,
+    "p10": 0.06922647394953536,
+    "p25": 0.15455848111427795,
+    "p75": 0.6445439167105645,
+    "p90": 1.4506605021719283
+  },
+  "polyline_degenerate_rate": null,
+  "polyline_band_iou_mean": null,
+  "polyline_band_iou_median": null,
+  "cej_collapse_rate": 0.3070725156669651,
+  "md_distance_px": {
+    "median": 153.3052928853729,
+    "mean": 136.91867742276952,
+    "p10": 1.106646728515625,
+    "p25": 3.7684326171875,
+    "p75": 239.86798040124594,
+    "p90": 274.88168139975807
+  },
+  "score_threshold": 0.5,
+  "elapsed_seconds": 53.17719033395406,
+  "px_per_mm_anchor_tooth_height_mm": 21.0
+}

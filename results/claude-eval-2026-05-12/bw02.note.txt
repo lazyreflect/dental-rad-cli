@@ -1,0 +1,3 @@
+Radiograph demonstrate unknown bone loss, severe (AAP Stage IV).
+
+Low-confidence findings to verify: #1 distal bone_loss, #2 mesial bone_loss, #3 distal bone_loss.

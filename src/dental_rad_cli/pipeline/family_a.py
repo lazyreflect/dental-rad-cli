@@ -55,7 +55,11 @@ _SEVERE_MIN_MM: float = 6.0
 _MAX_PLAUSIBLE_MM: float = 25.0
 
 
-def band_centerline_y_at_x(band: np.ndarray, x: float) -> Optional[float]:
+def band_centerline_y_at_x(
+    band: np.ndarray,
+    x: float,
+    bbox_y_range: Optional[tuple[float, float]] = None,
+) -> Optional[float]:
     """Median y of band pixels at integer column ``round(x)``.
 
     Treats the band's centerline as the per-column median of its
@@ -63,8 +67,18 @@ def band_centerline_y_at_x(band: np.ndarray, x: float) -> Optional[float]:
     is a stable centerline approximation that doesn't require
     skeletonization — works directly on the proto-mask output.
 
-    Returns None if x is out of the image or the column has no band
-    pixels (degenerate site).
+    ``bbox_y_range`` (optional) restricts the y-axis scan to ``[y1, y2]``.
+    Critical on bitewings: the same x column can carry CEJ band pixels
+    in BOTH the upper AND lower arch frames; the unconstrained median
+    picks an arbitrary cluster and produces cross-frame contamination
+    (a ~16 mm "bone loss" reading on bw01 was diagnosed as exactly
+    this — distance from upper-frame CEJ to lower-frame bone-crest).
+    Restricting to the tooth's bbox y-range eliminates the failure
+    mode by construction.
+
+    Returns None if x is out of the image, the column has no band
+    pixels in range, or (when bbox_y_range is given) no band pixels
+    fall inside the bbox.
     """
     h, w = band.shape
     xi = int(round(x))
@@ -74,6 +88,11 @@ def band_centerline_y_at_x(band: np.ndarray, x: float) -> Optional[float]:
     ys = np.flatnonzero(column)
     if ys.size == 0:
         return None
+    if bbox_y_range is not None:
+        y1, y2 = bbox_y_range
+        ys = ys[(ys >= y1) & (ys <= y2)]
+        if ys.size == 0:
+            return None
     return float(np.median(ys))
 
 
@@ -145,12 +164,13 @@ def per_tooth_family_a(
     free by design). The ``reason`` field carries a machine-readable
     code when a site can't be measured.
     """
-    x1, _y1, x2, _y2 = bbox
+    x1, y1, x2, y2 = bbox
+    bbox_y = (y1, y2)
 
-    cej_m_y = band_centerline_y_at_x(cej_band, x1)
-    cej_d_y = band_centerline_y_at_x(cej_band, x2)
-    bone_m_y = band_centerline_y_at_x(bone_band, x1)
-    bone_d_y = band_centerline_y_at_x(bone_band, x2)
+    cej_m_y = band_centerline_y_at_x(cej_band, x1, bbox_y)
+    cej_d_y = band_centerline_y_at_x(cej_band, x2, bbox_y)
+    bone_m_y = band_centerline_y_at_x(bone_band, x1, bbox_y)
+    bone_d_y = band_centerline_y_at_x(bone_band, x2, bbox_y)
 
     def _build_site(
         cej_y: Optional[float], bone_y: Optional[float]

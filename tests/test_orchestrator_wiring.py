@@ -177,17 +177,9 @@ def test_run_keypoint_passes_pairs_by_iou_and_propagates_none_for_misses(
             ),
         }
     ]
-    # Apex model: predicted way off to the side — IoU below 0.3 threshold → None.
-    apex_inst = [
-        {
-            "bbox": (500.0, 500.0, 600.0, 700.0),
-            "keypoints": np.array([[550.0, 600.0, 1.0]], dtype=np.float32),
-        }
-    ]
-
+    # v2 Phase 2: apex pathway removed; only CEJ + bone are run.
     bundle.get_keypoint_cej = lambda: _FakeKPModel(cej_inst)  # type: ignore[method-assign]
     bundle.get_keypoint_bone = lambda: _FakeKPModel(bone_inst)  # type: ignore[method-assign]
-    bundle.get_keypoint_apex = lambda: _FakeKPModel(apex_inst)  # type: ignore[method-assign]
 
     kp_rows = _run_keypoint_passes(bundle, _rgb(h=400, w=400), detections, device="cpu")
 
@@ -196,7 +188,8 @@ def test_run_keypoint_passes_pairs_by_iou_and_propagates_none_for_misses(
     assert row["fdi"] == "1"
     assert row["cej"] == [(120.0, 150.0), (180.0, 150.0)]
     assert row["bone_crest"] == [(125.0, 170.0), (175.0, 170.0)]
-    assert row["apex"] is None  # IoU below threshold
+    # apex no longer in the row dict (v2 Phase 2 deletion).
+    assert "apex" not in row
 
 
 def test_run_segmentation_extracts_polygons_for_tooth_and_bone(
@@ -243,7 +236,7 @@ def test_build_findings_threads_into_valid_analysis_result() -> None:
             "fdi": "1",
             "cej": [(110.0, 100.0), (190.0, 100.0)],
             "bone_crest": [(115.0, 130.0), (185.0, 130.0)],
-            "apex": (150.0, 300.0),
+            # v2 Phase 2: apex no longer threaded through.
         }
     ]
     # No tooth/bone polygons → pattern stays "unknown" (the rasterize
@@ -262,11 +255,13 @@ def test_build_findings_threads_into_valid_analysis_result() -> None:
     assert t.fdi == "1"
     assert t.root_class == "single"
     assert isinstance(t.bone_loss, BoneLossPerSite)
-    # CEJ-bone-apex are colinear-ish here; pct should be a small positive
-    # number well below the severe threshold.
+    # v2 Phase 2: legacy keypoint pathway now computes mm (not pct).
+    # CEJ at y=100, bone at y=130 → 30 px diff. With bbox height
+    # 300 px and 21 mm anchor, px_per_mm = 300/21 ≈ 14.3, so mm ≈ 2.1.
     assert t.bone_loss.mesial is not None
-    assert t.bone_loss.mesial.pct is not None
-    assert 0.0 < t.bone_loss.mesial.pct < 50.0
+    assert t.bone_loss.mesial.mm_estimate is not None
+    assert t.bone_loss.mesial.pct is None  # apex-free → no pct
+    assert 0.0 < t.bone_loss.mesial.mm_estimate < 10.0
     # CEJ y (100) < apex y (300) → mandibular per jaw rule (brief §3.1).
     assert summary.jaw_classification == "mandibular"
     # No severe sites here → Stage I or II.

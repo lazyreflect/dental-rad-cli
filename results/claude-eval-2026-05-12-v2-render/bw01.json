@@ -1,0 +1,341 @@
+{
+  "schema_version": "0.1",
+  "image": {
+    "path": "bw01.png",
+    "width": 999,
+    "height": 782,
+    "type": "unknown"
+  },
+  "teeth": [
+    {
+      "fdi": "1",
+      "universal": "1",
+      "bbox": [
+        182.29263305664062,
+        397.2852783203125,
+        577.5950317382812,
+        782.0
+      ],
+      "confidence": 0.8,
+      "root_class": "single",
+      "keypoints": {
+        "cej_mesial": [
+          242.47787475585938,
+          580.2227172851562,
+          1.0
+        ],
+        "cej_distal": [
+          534.8555908203125,
+          647.6446533203125,
+          1.0
+        ],
+        "bone_crest_mesial": [
+          170.72531127929688,
+          763.9549560546875,
+          1.0
+        ],
+        "bone_crest_distal": [
+          585.2528686523438,
+          669.3400268554688,
+          1.0
+        ],
+        "apex": [
+          196.8895721435547,
+          780.5352172851562,
+          1.0
+        ]
+      },
+      "bone_loss": {
+        "mesial": {
+          "pct": 95.0,
+          "tier": "severe"
+        },
+        "distal": {
+          "reason": "incomputable"
+        }
+      },
+      "pattern": "horizontal",
+      "caries": []
+    },
+    {
+      "fdi": "2",
+      "universal": "2",
+      "bbox": [
+        233.04505920410156,
+        0.0,
+        538.5972900390625,
+        352.140869140625
+      ],
+      "confidence": 0.591,
+      "root_class": "double",
+      "keypoints": {
+        "cej_mesial": [
+          271.63427734375,
+          103.08448028564453,
+          1.0
+        ],
+        "cej_distal": [
+          525.59228515625,
+          152.91677856445312,
+          1.0
+        ],
+        "bone_crest_mesial": [
+          234.3594207763672,
+          109.87875366210938,
+          1.0
+        ],
+        "bone_crest_distal": [
+          543.01220703125,
+          137.22634887695312,
+          1.0
+        ],
+        "apex": [
+          401.5998229980469,
+          1.4646233320236206,
+          1.0
+        ]
+      },
+      "bone_loss": {
+        "mesial": {
+          "reason": "incomputable"
+        },
+        "distal": {
+          "pct": 0.6,
+          "tier": "mild"
+        }
+      },
+      "pattern": "unknown",
+      "caries": []
+    },
+    {
+      "fdi": "3",
+      "universal": "3",
+      "bbox": [
+        515.876708984375,
+        0.0,
+        884.9066162109375,
+        384.22332763671875
+      ],
+      "confidence": 0.778,
+      "root_class": "double",
+      "keypoints": {
+        "cej_mesial": [
+          542.4006958007812,
+          154.86288452148438,
+          1.0
+        ],
+        "cej_distal": [
+          857.1307373046875,
+          176.35806274414062,
+          1.0
+        ],
+        "bone_crest_mesial": [
+          514.9285888671875,
+          137.1101837158203,
+          1.0
+        ],
+        "bone_crest_distal": [
+          865.6927490234375,
+          132.23081970214844,
+          1.0
+        ],
+        "apex": [
+          634.1817626953125,
+          50.2584342956543,
+          1.0
+        ]
+      },
+      "bone_loss": {
+        "mesial": {
+          "reason": "incomputable"
+        },
+        "distal": {
+          "pct": 5.6,
+          "tier": "mild"
+        }
+      },
+      "pattern": "unknown",
+      "caries": []
+    },
+    {
+      "fdi": "4",
+      "universal": "4",
+      "bbox": [
+        545.8054809570312,
+        452.31976318359375,
+        895.7603759765625,
+        782.0
+      ],
+      "confidence": 0.511,
+      "root_class": "single",
+      "keypoints": {
+        "cej_mesial": [
+          564.9821166992188,
+          646.8973388671875,
+          1.0
+        ],
+        "cej_distal": [
+          877.93017578125,
+          664.455810546875,
+          1.0
+        ],
+        "bone_crest_mesial": [
+          551.5060424804688,
+          669.1728515625,
+          1.0
+        ],
+        "bone_crest_distal": [
+          905.66650390625,
+          686.75634765625,
+          1.0
+        ],
+        "apex": [
+          612.1775512695312,
+          699.5458374023438,
+          1.0
+        ]
+      },
+      "bone_loss": {
+        "mesial": {
+          "pct": 10.7,
+          "tier": "mild"
+        },
+        "distal": {
+          "reason": "incomputable"
+        }
+      },
+      "pattern": "unknown",
+      "caries": []
+    },
+    {
+      "fdi": "5",
+      "universal": "5",
+      "bbox": [
+        850.3241577148438,
+        10.03012466430664,
+        999.0,
+        371.4869689941406
+      ],
+      "confidence": 0.894,
+      "root_class": "single",
+      "keypoints": {
+        "cej_mesial": [
+          855.4011840820312,
+          170.07029724121094,
+          1.0
+        ],
+        "cej_distal": [
+          861.2424926757812,
+          173.9759979248047,
+          1.0
+        ],
+        "bone_crest_mesial": [
+          855.1166381835938,
+          122.96174621582031,
+          1.0
+        ],
+        "bone_crest_distal": [
+          903.8906860351562,
+          123.9374008178711,
+          1.0
+        ],
+        "apex": [
+          878.376953125,
+          94.24303436279297,
+          1.0
+        ]
+      },
+      "bone_loss": {
+        "mesial": {
+          "pct": 56.8,
+          "tier": "severe"
+        },
+        "distal": {
+          "pct": 71.0,
+          "tier": "severe"
+        }
+      },
+      "pattern": "unknown",
+      "caries": []
+    }
+  ],
+  "summary": {
+    "bone_loss_pattern": "unknown",
+    "aap_stage_estimate": "IV",
+    "jaw_classification": "maxillary",
+    "vertical_defects": [],
+    "caries_findings": [],
+    "quadrants": [
+      {
+        "quadrant": "UR",
+        "n_teeth": 0,
+        "n_mild": 0,
+        "n_moderate": 0,
+        "n_severe": 0
+      },
+      {
+        "quadrant": "UL",
+        "n_teeth": 0,
+        "n_mild": 0,
+        "n_moderate": 0,
+        "n_severe": 0
+      },
+      {
+        "quadrant": "LL",
+        "n_teeth": 0,
+        "n_mild": 0,
+        "n_moderate": 0,
+        "n_severe": 0
+      },
+      {
+        "quadrant": "LR",
+        "n_teeth": 0,
+        "n_mild": 0,
+        "n_moderate": 0,
+        "n_severe": 0
+      }
+    ]
+  },
+  "low_confidence_findings": [
+    {
+      "type": "bone_loss",
+      "tooth": "1",
+      "surface": "distal",
+      "reason": "incomputable"
+    },
+    {
+      "type": "bone_loss",
+      "tooth": "2",
+      "surface": "mesial",
+      "reason": "incomputable"
+    },
+    {
+      "type": "bone_loss",
+      "tooth": "3",
+      "surface": "mesial",
+      "reason": "incomputable"
+    },
+    {
+      "type": "bone_loss",
+      "tooth": "4",
+      "surface": "distal",
+      "reason": "incomputable"
+    }
+  ],
+  "note_draft": "Radiograph demonstrate unknown bone loss, severe (AAP Stage IV).\n\nLow-confidence findings to verify: #1 distal bone_loss, #2 mesial bone_loss, #3 mesial bone_loss, #4 distal bone_loss.",
+  "metadata": {
+    "models": {
+      "tooth_detect": "tooth_detect",
+      "keypoint_cej": "keypoint_cej",
+      "keypoint_bone": "keypoint_bone",
+      "keypoint_apex": "keypoint_apex",
+      "segmentation_tooth": "segmentation_tooth",
+      "segmentation_bone": "segmentation_bone",
+      "caries": "caries"
+    },
+    "runtime_seconds": 4.741,
+    "device": "mps",
+    "schema_version": "0.1",
+    "dry_run": false
+  }
+}

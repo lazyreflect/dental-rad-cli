@@ -134,7 +134,8 @@ def test_polyline_below_threshold_blocks_apex_fallback() -> None:
 
 def test_no_polyline_runs_legacy_keypoint_pathway() -> None:
     """When the polyline model is absent entirely (cej_band is None),
-    the v1 keypoint+apex pathway runs as before.
+    the legacy keypoint pathway runs — apex-free per v2 Phase 2.
+    Computes mm from keypoint y-coords directly (no apex involved).
     """
     image_shape = (400, 400)
     bone_polys = [[(0.0, 115.0), (400.0, 115.0), (400.0, 145.0), (0.0, 145.0)]]
@@ -143,7 +144,7 @@ def test_no_polyline_runs_legacy_keypoint_pathway() -> None:
         "fdi": "1",
         "cej": [(120.0, 100.0), (180.0, 100.0)],
         "bone_crest": [(120.0, 130.0), (180.0, 130.0)],
-        "apex": (150.0, 250.0),
+        # v2 Phase 2: no apex in keypoint row.
     }]
 
     teeth, _summary, low_conf = _build_findings_from_stages(
@@ -160,11 +161,10 @@ def test_no_polyline_runs_legacy_keypoint_pathway() -> None:
     assert len(teeth) == 1
     site = teeth[0].bone_loss.mesial
     assert site is not None
-    # pct should be populated by the keypoint pathway.
-    assert site.pct is not None
-    # mm_estimate stays None (legacy mode doesn't compute mm).
-    assert site.mm_estimate is None
-    # No low_model_confidence findings — we used the legacy path.
+    # v2 Phase 2: legacy pathway emits mm, not pct.
+    assert site.mm_estimate is not None
+    assert site.pct is None  # apex-free → no pct
+    # No low_model_confidence findings — we used the legacy keypoint mm path.
     assert not any(
         f.reason == "low_model_confidence" for f in low_conf
     )

@@ -185,8 +185,16 @@ def _draw_site_segment(
     is_low = _site_is_low_confidence(tooth.fdi, surface, low_conf)
     linestyle = "--" if is_low else "-"
 
+    # Draw the segment vertical at the CEJ x-position. The mm
+    # calculation is already vertical (abs(bone_y − cej_y) / px_per_mm)
+    # — projecting onto the y-axis as a proxy for the tooth's long
+    # axis. Drawing the segment between the literal predicted CEJ x and
+    # bone-crest x produced diagonal lines that contradicted the math
+    # and confused the chairside read. Keep the line parallel to the
+    # tooth's long axis (vertical for typical PA/BW orientations) by
+    # anchoring both endpoints at the CEJ x. Same end y-values, same mm.
     ax.plot(
-        [cej[0], crest[0]],
+        [cej[0], cej[0]],
         [cej[1], crest[1]],
         color=color,
         linewidth=line_w,

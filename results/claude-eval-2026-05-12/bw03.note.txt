@@ -1,0 +1,5 @@
+Radiograph demonstrate mixed bone loss, severe (AAP Stage IV), with a vertical defect tooth of #3 (~100%).
+
+Interproximal caries: #4 distal (E1), #5 mesial (D3).
+
+Low-confidence findings to verify: #1 mesial bone_loss, #2 distal bone_loss, #3 distal bone_loss, #4 distal caries (65% confidence), #5 distal bone_loss, #5 mesial caries (67% confidence), #7 mesial bone_loss, #7 distal bone_loss.
