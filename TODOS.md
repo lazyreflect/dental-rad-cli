@@ -63,6 +63,45 @@ after first chairside use reveals which matter.
 | W2 | OPEN | Update design doc at `~/repos/work-root/.claude/worktrees/priceless-poitras-203181/output/proposals/2026-05-11-dental-rad-cli-v0-design.md` with all locked decisions: A2 paper-exact arch, MIT license, hardware (RTX 4090 + M4 Max, no Mac Mini), no Huan testing, Baasils for caries, GitHub Release weights deferred per Elon-mode, etc. | After hour-5 gate decision so design doc reflects actual perception outcome, not just plan |
 | W3 | OPEN | After v0.5 caries training finishes, evaluate whether to fold the now-stale Renielaz caveat in `docs/v0.5-caries-remediation.md` into a shorter "lessons learned" section, OR keep the full forensic for institutional memory. | When v0.5 has been running cleanly for ≥1 week without surfacing new corruption-pattern concerns |
 
+## Office-data scaling ladder (v0.6 onward)
+
+Joseph has ~25,000 patients in his office's PMS, each with potentially
+multiple FMX/BW image sets over years. Conservative estimate: ~80K-
+150K unlabeled radiographs sitting in the practice's image archive.
+
+In 2026 ML this is enough data to outperform a public-corpus baseline
+*without* hand-labeling all of it. Foundation models + self-supervised
+pretraining + active-learning annotation collapse the labeled-data
+requirement by 10-100x compared to 2019-era supervised CV.
+
+The ladder below converts existing PMS radiographs into trainable
+signal without 125K hand-labels. Each rung has a clean trigger.
+
+| ID | Status | Description | Trigger |
+|----|--------|-------------|---------|
+| D1 | OPEN | **PHI scrub pipeline at scale.** Automate DICOM-header strip + burned-in pixel-region detection (corner heuristic + small OCR pass) + randomized filename + audit log. Outputs scrubbed image pool at `~/tenant-data/dental-rad-eval/scrubbed-corpus/`. Bounded engineering: ~2-3 days. Replaces the 4-image hour-0 manual recipe. | When v0.5 chairside use validates the perception layer and Joseph wants to fine-tune to his office's BW distribution |
+| D2 | OPEN | **Pull all PMS radiographs into the scrub pipeline.** Use curve-genie / dental-sdk-server to enumerate patients with images, download via Curve API or direct image-archive export, route through D1. Resulting corpus: ~80K-150K scrubbed BWs/PAs. Storage: ~40 GB at ~300 KB/image, fits on pickles' disk post-Steam cleanup. | After D1 ships |
+| D3 | OPEN | **Self-supervised pretraining on the scrubbed corpus.** SimCLR / MAE / DINO-style pretraining of an image encoder on the full unlabeled pool. No labels needed; the encoder learns "what does a dental radiograph look like" representations stronger than ImageNet's. Output: a `dental-encoder.pt` checkpoint reusable as the backbone for tooth-detect / keypoint / segmentation / caries heads. ~12-48 hours of training on RTX 4090. | After D2 ships |
+| D4 | OPEN | **Active-learning annotation pass.** Use the D3 encoder + the v0.5 model heads to pre-annotate the office corpus. Surface the top-N most-uncertain cases for Joseph's review in Label Studio (F4). Target: ~500-2,000 reviewed cases over a few weeks. Per-case time drops to 10-20 sec because geometry is pre-placed; Joseph only judges class assignment + corrections. | After D3 produces usable pre-annotations |
+| D5 | OPEN | **Fine-tune the v0.5 model heads on the D4 corpus.** Initialize from public-data weights, fine-tune on office-labeled data. Expected accuracy lift vs v0.5 baseline: significant (the office data is in-distribution; public data is partly mismatched). This is the v1.0 quality bar — at-or-above Overjet's reported numbers on Joseph's distribution. | After D4 reaches ~500 reviewed cases |
+| D6 | OPEN | **Outcome feedback loop.** Once v1.0 is deployed chairside, capture doctor accept/edit/reject events per finding into a structured log. Periodic retraining incorporates this signal — model learns "Joseph rejected this caries finding" → adjust threshold. This is the closest analogue to Overjet's carrier-feedback moat and produces the same compounding-quality effect. | After v1.0 chairside use accumulates ≥1 month of accept/edit logs |
+| D7 | OPEN | **Longitudinal cohort training.** PMS holds patients over many years. Training on "same tooth across multiple FMX sets" enables temporal models (bone loss progression, caries development rate). Different head architecture; same encoder backbone from D3. v1.x territory. | After D5 ships and clinical use surfaces specific multi-image questions (e.g., "is this bone loss progressing?") |
+
+**Strategic note.** This ladder is the alternative to a multi-tenant
+federated training story. A single office at ~25K patients is enough
+to compete with payer-side commercial perception (Overjet/Pearl) on
+provider-side accuracy, as long as the workflow exists to turn
+unlabeled radiographs into trainable signal without hand-labeling all
+of them. By D5/D6 the model trained on Joseph's office data should
+be at-or-above Overjet's reported accuracy on his distribution. The
+federated/multi-tenant pool becomes a v2.0+ nice-to-have, not a
+precondition for credibility.
+
+This changes the workspace-mission framing slightly: tenant #2 is no
+longer required for the perception layer to be load-bearing. It becomes
+required for the *generalization-across-offices* claim, which is a
+different (and longer-horizon) product.
+
 ## Memory items (worth surfacing to workspace-Claude)
 
 Once dental-rad-cli stabilizes (after first chairside use), these
