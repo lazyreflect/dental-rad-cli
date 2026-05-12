@@ -69,8 +69,18 @@ WEIGHTS_FILES: Dict[str, str] = {
     "keypoint_apex": "keypoint_apex.pt",
     "segmentation_tooth": "segmentation_tooth.pt",
     "segmentation_bone": "segmentation_bone.pt",
+    "segmentation_cej": "segmentation_cej.pt",
     "caries": "caries.pt",
 }
+
+# v2 CEJ polyline pivot: when the trained polyline model has at least
+# this many confident predictions, route CEJ → Family A mm math
+# (apex-free). Below threshold, fall back to the v1 keypoint pathway
+# OR emit "low_model_confidence" findings if both fail. See
+# output/training-evidence/2026-05-12-karpathy-findings.md for the
+# stratification that picked this threshold (131/200 images at 100%
+# success on the kept set).
+CEJ_POLYLINE_CONF_THRESHOLD: float = 0.5
 
 
 class WeightsNotFoundError(FileNotFoundError):
@@ -153,6 +163,26 @@ class ModelBundle:
             from ultralytics import YOLO
             self._segmentation_bone = YOLO(str(self._weight_path("segmentation_bone")))
         return self._segmentation_bone
+
+    _segmentation_cej: Optional[Any] = None
+
+    def get_segmentation_cej(self) -> Any:
+        if self._segmentation_cej is None:
+            from ultralytics import YOLO
+            self._segmentation_cej = YOLO(str(self._weight_path("segmentation_cej")))
+        return self._segmentation_cej
+
+    def segmentation_cej_weights_path(self) -> Optional[Path]:
+        """Return the CEJ-polyline weights path if present, else None.
+
+        Same graceful pattern as caries — when the polyline model hasn't
+        been trained yet (or has been intentionally omitted), the
+        orchestrator falls back to the v1 keypoint pathway.
+        """
+        try:
+            return self._weight_path("segmentation_cej")
+        except WeightsNotFoundError:
+            return None
 
     def get_caries(self) -> Any:
         if self._caries is None:
@@ -498,6 +528,60 @@ def _run_keypoint_passes(
     return out_rows
 
 
+def _run_cej_polyline(
+    bundle: ModelBundle,
+    rgb: Any,
+    device: str = "cpu",
+    conf: float = 0.25,
+) -> Tuple[Optional[Any], float, int]:
+    """Run the CEJ polyline-segmentation model; return union band + stats.
+
+    Returns ``(band_mask, max_conf, n_masks)``:
+
+    - ``band_mask``: bool ndarray of shape (H, W) — union of all
+      detection masks resized to image resolution. ``None`` if the
+      model is not available or produces no masks.
+    - ``max_conf``: maximum prediction confidence across all detections.
+      ``0.0`` if no detections.
+    - ``n_masks``: number of mask instances predicted (before union).
+
+    Per the karpathy stratification (n=200 DenPAR Testing), max_conf
+    ≥ 0.5 is the threshold above which prediction-success is 100%.
+    Callers check ``max_conf >= CEJ_POLYLINE_CONF_THRESHOLD`` before
+    consuming the band for Family A math; below that, the v1
+    keypoint pathway runs as a fallback (or both fail and the site
+    gets a "low_model_confidence" entry).
+    """
+    if bundle.segmentation_cej_weights_path() is None:
+        return None, 0.0, 0
+    import cv2
+    import numpy as np
+
+    model = bundle.get_segmentation_cej()
+    results = model.predict(rgb, conf=conf, verbose=False, device=device)
+    if not results:
+        return None, 0.0, 0
+    res0 = results[0]
+    masks_obj = getattr(res0, "masks", None)
+    if masks_obj is None or len(masks_obj) == 0:
+        return None, 0.0, 0
+    h, w = rgb.shape[:2]
+    masks = masks_obj.data.cpu().numpy().astype(bool)
+    band = np.zeros((h, w), dtype=bool)
+    for m in masks:
+        m_rs = cv2.resize(
+            m.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST
+        ).astype(bool)
+        band |= m_rs
+    boxes = getattr(res0, "boxes", None)
+    max_conf = 0.0
+    if boxes is not None and boxes.conf is not None:
+        confs = boxes.conf.cpu().numpy()
+        if confs.size > 0:
+            max_conf = float(confs.max())
+    return band, max_conf, int(len(masks))
+
+
 def _run_segmentation(
     bundle: ModelBundle,
     rgb: Any,
@@ -621,6 +705,8 @@ def _build_findings_from_stages(
     bone_polys: List[List[Tuple[float, float]]],
     caries: List[CariesFinding],
     image_shape: Optional[Tuple[int, int]] = None,
+    cej_band: Optional[Any] = None,
+    cej_band_max_conf: float = 0.0,
 ) -> Tuple[List[ToothFinding], Summary, List[Any]]:
     """Compose rule-layer outputs into ToothFindings + Summary.
 
@@ -628,10 +714,21 @@ def _build_findings_from_stages(
     pattern classifier. If ``None``, the pattern stage is skipped and
     each tooth's pattern stays ``"unknown"``.
 
+    ``cej_band`` is the optional CEJ polyline-segmentation band mask
+    (np.ndarray bool, shape (H, W)). When provided and
+    ``cej_band_max_conf >= CEJ_POLYLINE_CONF_THRESHOLD``, the
+    Family A apex-free mm pathway runs in place of the v1 keypoint +
+    apex % math. When confidence is insufficient OR Family A can't
+    produce a measurement (band doesn't cover bbox edges), the
+    pipeline falls back to the v1 keypoint pathway.
+
     Returns ``(teeth, summary, low_confidence_findings)``.
     """
     from dental_rad_cli.pipeline.severity import (
         compute_bone_loss_pct, severity_tier,
+    )
+    from dental_rad_cli.pipeline.family_a import (
+        calibrate_px_per_mm, per_tooth_family_a,
     )
     from dental_rad_cli.pipeline.pattern import classify_pattern
     from dental_rad_cli.pipeline.aggregate import (
@@ -647,6 +744,34 @@ def _build_findings_from_stages(
         ToothWithKeypoints,
         VerticalDefect,
     )
+
+    # v2 Family A routing decision.
+    #
+    # When the polyline model is available (cej_band is not None even
+    # at low confidence — it was loaded and run), the polyline becomes
+    # the authoritative gate: above threshold → Family A; below
+    # threshold → mark as low_model_confidence and DO NOT fall back to
+    # the v1 keypoint+apex pathway. The reasoning: if the CEJ polyline
+    # model isn't confident on this image, the apex predictions
+    # (trained on the same DenPAR distribution) are also unreliable;
+    # falling back produces a wrong measurement (e.g., apex predictions
+    # hug bbox-top → overestimated pct → spurious "severe" tier).
+    #
+    # When the polyline model is NOT loaded (legacy install / weights
+    # missing), the v1 keypoint+apex pathway runs as before.
+    polyline_loaded = cej_band is not None
+    use_family_a = (
+        polyline_loaded and cej_band_max_conf >= CEJ_POLYLINE_CONF_THRESHOLD
+    )
+    polyline_below_threshold = (
+        polyline_loaded and cej_band_max_conf < CEJ_POLYLINE_CONF_THRESHOLD
+    )
+    px_per_mm: Optional[float] = None
+    if use_family_a and detections:
+        det_bboxes = [
+            tuple(float(c) for c in d["bbox"]) for d in detections
+        ]
+        px_per_mm = calibrate_px_per_mm(det_bboxes)
 
     kp_by_fdi: Dict[str, Dict[str, Any]] = {
         kp.get("fdi", ""): kp for kp in keypoints if kp.get("fdi") is not None
@@ -700,66 +825,162 @@ def _build_findings_from_stages(
         bone_pair = kp_row.get("bone_crest")
         apex_pt = kp_row.get("apex")        # (x, y) | None
 
-        # Per-site bone-loss math. Mesial = first keypoint of each pair;
-        # distal = second. Apex is shared.
+        # Per-site bone-loss math.
         mesial_site: Optional[BoneLossSite] = None
         distal_site: Optional[BoneLossSite] = None
+        family_a_emitted = False
 
-        if cej_pair is not None and bone_pair is not None and apex_pt is not None:
-            cej_m, cej_d = cej_pair[0], cej_pair[1]
-            bone_m, bone_d = bone_pair[0], bone_pair[1]
-            pct_m = compute_bone_loss_pct(cej_m, bone_m, apex_pt)
-            pct_d = compute_bone_loss_pct(cej_d, bone_d, apex_pt)
-            mesial_site = BoneLossSite(
-                pct=pct_m,
-                tier=severity_tier(pct_m),
-                reason=None if pct_m is not None else "incomputable",
+        # v2 Family A pathway: apex-free mm CEJ→bone-crest. Runs first
+        # when the polyline model has confidence and we have a bone
+        # mask to query.
+        family_a_positions: Optional[Dict[str, Tuple[float, float]]] = None
+        if (
+            use_family_a
+            and bone_mask is not None
+            and px_per_mm is not None
+            and px_per_mm > 0
+        ):
+            from dental_rad_cli.pipeline.family_a import band_centerline_y_at_x
+
+            mesial_site, distal_site = per_tooth_family_a(
+                cej_band, bone_mask, det["bbox"], px_per_mm,
             )
-            distal_site = BoneLossSite(
-                pct=pct_d,
-                tier=severity_tier(pct_d),
-                reason=None if pct_d is not None else "incomputable",
+            family_a_emitted = (
+                mesial_site.mm_estimate is not None
+                or distal_site.mm_estimate is not None
             )
-            all_sites.append(mesial_site)
-            all_sites.append(distal_site)
-            if pct_m is None:
+            # Synthesize landmark positions from the band centerlines so
+            # the render layer (which draws CEJ→bone-crest segments
+            # between two points) can show mm sites without keypoint
+            # predictions. None where the band didn't cross that bbox
+            # edge — render layer falls back gracefully.
+            bx1, _, bx2, _ = det["bbox"]
+            cej_m_y = band_centerline_y_at_x(cej_band, bx1)
+            cej_d_y = band_centerline_y_at_x(cej_band, bx2)
+            bone_m_y = band_centerline_y_at_x(bone_mask, bx1)
+            bone_d_y = band_centerline_y_at_x(bone_mask, bx2)
+            family_a_positions = {
+                "cej_mesial": (bx1, cej_m_y) if cej_m_y is not None else None,
+                "cej_distal": (bx2, cej_d_y) if cej_d_y is not None else None,
+                "bone_mesial": (bx1, bone_m_y) if bone_m_y is not None else None,
+                "bone_distal": (bx2, bone_d_y) if bone_d_y is not None else None,
+            }
+            if family_a_emitted:
+                if mesial_site.tier is not None:
+                    all_sites.append(mesial_site)
+                if distal_site.tier is not None:
+                    all_sites.append(distal_site)
+                for site, surface in (
+                    (mesial_site, "mesial"), (distal_site, "distal")
+                ):
+                    if site.mm_estimate is None:
+                        low_confidence.append(
+                            LowConfidenceFinding(
+                                type="bone_loss",
+                                tooth=fdi,
+                                surface=surface,
+                                reason=site.reason or "incomputable",
+                            )
+                        )
+
+        # v1 keypoint pathway: legacy fallback. Only runs when the
+        # polyline model is NOT loaded at all (legacy install). When
+        # polyline IS loaded but below confidence threshold, prefer
+        # "I don't know" over a wrong apex-pathway measurement.
+        if not family_a_emitted and not polyline_below_threshold:
+            if (
+                cej_pair is not None
+                and bone_pair is not None
+                and apex_pt is not None
+            ):
+                cej_m, cej_d = cej_pair[0], cej_pair[1]
+                bone_m, bone_d = bone_pair[0], bone_pair[1]
+                pct_m = compute_bone_loss_pct(cej_m, bone_m, apex_pt)
+                pct_d = compute_bone_loss_pct(cej_d, bone_d, apex_pt)
+                mesial_site = BoneLossSite(
+                    pct=pct_m,
+                    tier=severity_tier(pct_m),
+                    reason=None if pct_m is not None else "incomputable",
+                )
+                distal_site = BoneLossSite(
+                    pct=pct_d,
+                    tier=severity_tier(pct_d),
+                    reason=None if pct_d is not None else "incomputable",
+                )
+                all_sites.append(mesial_site)
+                all_sites.append(distal_site)
+                if pct_m is None:
+                    low_confidence.append(
+                        LowConfidenceFinding(
+                            type="bone_loss",
+                            tooth=fdi,
+                            surface="mesial",
+                            reason="incomputable",
+                        )
+                    )
+                if pct_d is None:
+                    low_confidence.append(
+                        LowConfidenceFinding(
+                            type="bone_loss",
+                            tooth=fdi,
+                            surface="distal",
+                            reason="incomputable",
+                        )
+                    )
+            else:
+                # Neither Family A nor v1 keypoints produced a usable
+                # measurement. Legacy keypoint pathway preserves the
+                # "keypoint / missing_landmarks" code so existing
+                # downstream consumers + tests continue to work.
+                # When polyline gating is the cause, callers handle
+                # that case via the `elif polyline_below_threshold`
+                # branch below.
                 low_confidence.append(
                     LowConfidenceFinding(
-                        type="bone_loss",
+                        type="keypoint",
                         tooth=fdi,
-                        surface="mesial",
-                        reason="incomputable",
+                        reason="missing_landmarks",
                     )
                 )
-            if pct_d is None:
-                low_confidence.append(
-                    LowConfidenceFinding(
-                        type="bone_loss",
-                        tooth=fdi,
-                        surface="distal",
-                        reason="incomputable",
-                    )
-                )
-        else:
+        elif polyline_below_threshold and not family_a_emitted:
+            # Polyline model is loaded but didn't have enough confidence
+            # on this image. Skip the apex pathway entirely (it would
+            # produce an unreliable measurement) and emit "manual
+            # review recommended" per the karpathy ship strategy.
             low_confidence.append(
                 LowConfidenceFinding(
-                    type="keypoint",
+                    type="bone_loss",
                     tooth=fdi,
-                    reason="missing_landmarks",
+                    reason="low_model_confidence",
                 )
             )
 
         # Build ToothKeypointsFull from the matched per-tooth landmarks.
-        # Per-keypoint confidence is not propagated from KP-RCNN (we'd
-        # need to track .scores per instance); we surface 1.0 when
-        # present and treat absence as None.
-        kp_full = ToothKeypointsFull(
-            cej_mesial=(cej_pair[0][0], cej_pair[0][1], 1.0) if cej_pair else None,
-            cej_distal=(cej_pair[1][0], cej_pair[1][1], 1.0) if cej_pair else None,
-            bone_crest_mesial=(bone_pair[0][0], bone_pair[0][1], 1.0) if bone_pair else None,
-            bone_crest_distal=(bone_pair[1][0], bone_pair[1][1], 1.0) if bone_pair else None,
-            apex=(apex_pt[0], apex_pt[1], 1.0) if apex_pt else None,
-        )
+        # In Family A mode we synthesize landmark positions from the
+        # band centerlines so the render layer can draw CEJ→bone-crest
+        # segments without keypoint predictions. Otherwise fall back to
+        # the v1 keypoint pairs. Per-keypoint confidence is 1.0 when
+        # present; absence is None.
+        if family_a_positions is not None:
+            kp_full = ToothKeypointsFull(
+                cej_mesial=(*family_a_positions["cej_mesial"], cej_band_max_conf)
+                    if family_a_positions["cej_mesial"] is not None else None,
+                cej_distal=(*family_a_positions["cej_distal"], cej_band_max_conf)
+                    if family_a_positions["cej_distal"] is not None else None,
+                bone_crest_mesial=(*family_a_positions["bone_mesial"], 1.0)
+                    if family_a_positions["bone_mesial"] is not None else None,
+                bone_crest_distal=(*family_a_positions["bone_distal"], 1.0)
+                    if family_a_positions["bone_distal"] is not None else None,
+                apex=None,  # apex-free in Family A mode
+            )
+        else:
+            kp_full = ToothKeypointsFull(
+                cej_mesial=(cej_pair[0][0], cej_pair[0][1], 1.0) if cej_pair else None,
+                cej_distal=(cej_pair[1][0], cej_pair[1][1], 1.0) if cej_pair else None,
+                bone_crest_mesial=(bone_pair[0][0], bone_pair[0][1], 1.0) if bone_pair else None,
+                bone_crest_distal=(bone_pair[1][0], bone_pair[1][1], 1.0) if bone_pair else None,
+                apex=(apex_pt[0], apex_pt[1], 1.0) if apex_pt else None,
+            )
 
         # Pattern classification — requires tooth-mask + bone-mask + at
         # least one CEJ + bone-crest landmark.
@@ -1164,11 +1385,16 @@ def analyze(
         detections = _run_tooth_detection(bundle, rgb, device=device)
         keypoints = _run_keypoint_passes(bundle, rgb_clahe, detections, device=device)
         tooth_polys, bone_polys = _run_segmentation(bundle, rgb, device=device)
+        cej_band, cej_band_max_conf, _n_cej_masks = _run_cej_polyline(
+            bundle, rgb, device=device,
+        )
         caries = _run_caries_detection(bundle, rgb, detections)
 
         teeth, summary, low_confidence = _build_findings_from_stages(
             detections, keypoints, tooth_polys, bone_polys, caries,
             image_shape=(height, width),
+            cej_band=cej_band,
+            cej_band_max_conf=cej_band_max_conf,
         )
 
         image_meta = ImageMeta(

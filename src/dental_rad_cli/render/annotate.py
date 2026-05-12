@@ -193,7 +193,17 @@ def _draw_site_segment(
         linestyle=linestyle,
     )
 
-    if site and site.pct is not None:
+    # Prefer Family A mm measurement when present (v2); fall back to
+    # legacy % from keypoint+apex pathway. Either form drives the
+    # severity color above.
+    label_text: Optional[str] = None
+    if site is not None:
+        if site.mm_estimate is not None:
+            label_text = f"{site.mm_estimate:.1f}mm"
+        elif site.pct is not None:
+            label_text = f"{site.pct:.0f}%"
+
+    if label_text is not None:
         if tooth.pattern == "angular_vertical":
             hatch = "//"
         else:
@@ -212,7 +222,7 @@ def _draw_site_segment(
         ax.text(
             midx + 10 * font_scale,
             midy,
-            f"{site.pct:.0f}%",
+            label_text,
             color="white",
             fontsize=fs_pct,
             family="monospace",
@@ -267,6 +277,20 @@ def _summary_banner(result: AnalysisResult) -> str:
     pattern = s.bone_loss_pattern.replace("_", " ")
     stage = f"AAP Stage {s.aap_stage_estimate}" if s.aap_stage_estimate else "stage unknown"
     parts.append(f"{pattern} bone loss  ·  {stage}")
+
+    # Family A confidence advisory: when any tooth was kicked back as
+    # low_model_confidence, surface a chairside-actionable badge so the
+    # doctor knows to spot-check manually for those teeth.
+    low_conf_tooths = {
+        f.tooth for f in result.low_confidence_findings
+        if f.reason == "low_model_confidence" and f.tooth
+    }
+    if low_conf_tooths:
+        teeth_list = ", ".join(f"#{t}" for t in sorted(low_conf_tooths))
+        parts.append(
+            f"⚠ Manual measurement recommended for: {teeth_list}"
+        )
+
     if s.vertical_defects:
         defects = ", ".join(
             f"{d.site.replace('_', ' #')} ({d.pct:.0f}%)" for d in s.vertical_defects
