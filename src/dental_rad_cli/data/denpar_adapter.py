@@ -557,11 +557,174 @@ def _bone_polygon_from_polylines(
 
 
 # ---------------------------------------------------------------------------
+# CEJ polyline supervision (data-bottleneck-free)
+# ---------------------------------------------------------------------------
+
+# Mirror bone strip width: 30-px total band (proto-resolution-compatible
+# at YOLOv8x-seg's imgsz=640 / proto stride 4 → 160×160 mask basis).
+_CEJ_STRIP_HALF_WIDTH: Final[int] = 15
+
+# Y-band clustering: points within this y-distance of the previous
+# in-sweep point belong to the same cluster (one cluster ≈ one arch's
+# CEJ band). Anatomically, arch curvature + per-tooth CEJ scalloping
+# spans roughly 20-40 px y on DenPAR PAs; 50 px tolerance is
+# permissive enough to cover normal arch shape without bridging
+# upper/lower arches on BWs (which are typically 150+ px apart in y).
+# PA → typically one cluster; BW → typically two.
+_CEJ_Y_BAND_TOLERANCE_PX: Final[float] = 50.0
+
+# Within-cluster x-gap that triggers a polyline split. DenPAR CEJ
+# labels are sparse (~1 point per tooth, not 2), so consecutive x-
+# sorted points often span one or two missing teeth (gap 200-400 px).
+# 500 px threshold (~ half image width) connects across typical
+# missing-tooth gaps but splits on truly disjoint segments. Empirical
+# tuning on image 1: gaps of 237 and 408 px both belong in one arch
+# polyline; 500 absorbs them.
+_CEJ_X_PROXIMITY_PX: Final[float] = 500.0
+
+
+def _cluster_cej_points_into_polylines(
+    points: list[tuple[float, float]],
+) -> list[list[tuple[float, float]]]:
+    """Build polylines from a flat CEJ point list via y-band clustering.
+
+    Data-bottleneck-free supervision construction for the CEJ polyline
+    head. Anatomically motivated: CEJ is a continuous band across
+    teeth in an arch, not isolated per-tooth landmarks. No bbox
+    containment lookup — per-tooth attribution happens at inference
+    time, deterministically, when the predicted band intersects each
+    tooth bbox's left/right edges.
+
+    Algorithm:
+
+    1. Sort all input points by y. Linear sweep — start a new cluster
+       whenever consecutive sorted points have Δy > ``_CEJ_Y_BAND_-
+       TOLERANCE_PX``. Result: one cluster per arch.
+    2. Within each cluster, sort by x. Linear sweep — split into sub-
+       polylines on consecutive x-gaps > ``_CEJ_X_PROXIMITY_PX``.
+    3. Drop sub-polylines with < 2 points (a single isolated point
+       isn't a line and would contribute nothing buffered).
+
+    Returns a list of polylines, each an ordered (left-to-right) list
+    of (x, y) points. Empty list for fewer than 2 input points.
+    """
+    if len(points) < 2:
+        return []
+
+    # Step 1: y-band cluster via linear sweep.
+    pts_y_sorted = sorted(points, key=lambda p: p[1])
+    y_clusters: list[list[tuple[float, float]]] = []
+    current_cluster: list[tuple[float, float]] = [pts_y_sorted[0]]
+    for p in pts_y_sorted[1:]:
+        if abs(p[1] - current_cluster[-1][1]) <= _CEJ_Y_BAND_TOLERANCE_PX:
+            current_cluster.append(p)
+        else:
+            y_clusters.append(current_cluster)
+            current_cluster = [p]
+    y_clusters.append(current_cluster)
+
+    # Step 2: within each cluster, sort by x and split on large x-gaps.
+    polylines: list[list[tuple[float, float]]] = []
+    for cluster in y_clusters:
+        cluster.sort(key=lambda p: p[0])
+        current_line: list[tuple[float, float]] = [cluster[0]]
+        for i in range(1, len(cluster)):
+            if cluster[i][0] - cluster[i - 1][0] > _CEJ_X_PROXIMITY_PX:
+                if len(current_line) >= 2:
+                    polylines.append(current_line)
+                current_line = [cluster[i]]
+            else:
+                current_line.append(cluster[i])
+        if len(current_line) >= 2:
+            polylines.append(current_line)
+    return polylines
+
+
+def _cej_polygons_from_polylines(
+    polylines: list[list[tuple[float, float]]],
+) -> list[list[tuple[float, float]]]:
+    """Buffer CEJ polylines into 30-px-wide bands.
+
+    Mirrors `_bone_polygons_from_polylines` but with `_CEJ_STRIP_HALF_-
+    WIDTH`. Kept as a separate function so the bone path is unchanged
+    by the CEJ pivot. Overlapping polyline strips merge into a single
+    band polygon via shapely union; disjoint strips remain separate.
+
+    Returns ``[]`` if input is empty / degenerate / produces no valid
+    geometry. Otherwise returns one or more polygons, each as a list
+    of (x, y) exterior coordinates.
+    """
+    if not polylines:
+        return []
+    try:
+        from shapely.geometry import LineString, MultiPolygon, Polygon
+        from shapely.ops import unary_union
+    except ImportError:
+        return []
+
+    strips = []
+    for line in polylines:
+        if len(line) < 2:
+            continue
+        try:
+            ls = LineString([(float(x), float(y)) for x, y in line])
+            if not ls.is_valid or ls.is_empty:
+                continue
+            strip = ls.buffer(_CEJ_STRIP_HALF_WIDTH)
+            if not strip.is_empty:
+                strips.append(strip)
+        except (TypeError, ValueError):
+            continue
+
+    if not strips:
+        return []
+
+    merged = unary_union(strips)
+    polygons: list[Polygon] = []
+    if isinstance(merged, Polygon):
+        if not merged.is_empty:
+            polygons.append(merged)
+    elif isinstance(merged, MultiPolygon):
+        for geom in merged.geoms:
+            if isinstance(geom, Polygon) and not geom.is_empty:
+                polygons.append(geom)
+    else:
+        for geom in getattr(merged, "geoms", []):
+            if isinstance(geom, Polygon) and not geom.is_empty:
+                polygons.append(geom)
+
+    return [
+        [(float(x), float(y)) for x, y in p.exterior.coords]
+        for p in polygons
+    ]
+
+
+def _cej_polygons_for_image(
+    split_root: Path, stem: str
+) -> list[list[tuple[float, float]]]:
+    """Build CEJ band polygons for one image's YOLO-seg training label.
+
+    Loads the flat ``CEJ_Points`` list from the keypoint annotation
+    JSON, clusters into polylines via y-band clustering, buffers each
+    polyline to a 30-px band. Returns ``[]`` if the annotation is
+    missing or contains < 2 CEJ points (no line can be drawn).
+    """
+    kp = _load_keypoint_json(split_root, stem)
+    if kp is None:
+        return []
+    cej_pts = [
+        (float(p[0]), float(p[1])) for p in (kp.get("CEJ_Points") or [])
+    ]
+    polylines = _cluster_cej_points_into_polylines(cej_pts)
+    return _cej_polygons_from_polylines(polylines)
+
+
+# ---------------------------------------------------------------------------
 # YOLO output
 # ---------------------------------------------------------------------------
 
 
-YoloTarget = Literal["tooth_detect", "tooth_seg", "bone_seg"]
+YoloTarget = Literal["tooth_detect", "tooth_seg", "bone_seg", "cej_seg"]
 
 
 def _yolo_detection_row(
@@ -604,6 +767,9 @@ def _write_yolo_dataset_yaml(
     elif target == "tooth_seg":
         names_line = "names:\n  0: tooth\n"
         nc = 1
+    elif target == "cej_seg":
+        names_line = "names:\n  0: cej\n"
+        nc = 1
     else:  # bone_seg
         names_line = "names:\n  0: bone\n"
         nc = 1
@@ -633,8 +799,11 @@ def build_yolo_dataset(
         output_root: Where to write the YOLO dataset. Existing files
             are overwritten; idempotent re-runs are safe.
         target: One of ``"tooth_detect"`` (2-class detection),
-            ``"tooth_seg"`` (1-class instance segmentation), or
-            ``"bone_seg"`` (1-class bone segmentation).
+            ``"tooth_seg"`` (1-class instance segmentation),
+            ``"bone_seg"`` (1-class bone segmentation), or
+            ``"cej_seg"`` (1-class CEJ band segmentation; supervision
+            built via y-band clustering of the flat DenPAR CEJ point
+            list — see `_cluster_cej_points_into_polylines`).
 
     Returns:
         Path to the generated ``dataset.yaml``.
@@ -683,6 +852,18 @@ def build_yolo_dataset(
                         row = _yolo_seg_row(0, poly, img_w, img_h)
                         if row is not None:
                             rows.append(row)
+
+            elif target == "cej_seg":
+                # CEJ band built via y-band clustering of the flat
+                # CEJ_Points list. One polyline per arch (PA usually
+                # one; BW usually two — upper + lower). Buffered to a
+                # 30-px band. Per-tooth attribution happens at
+                # inference, not training.
+                polys = _cej_polygons_for_image(split_root, stem)
+                for poly in polys:
+                    row = _yolo_seg_row(0, poly, img_w, img_h)
+                    if row is not None:
+                        rows.append(row)
 
             else:  # bone_seg
                 # v3 polylines often have x-disjoint strips (one per

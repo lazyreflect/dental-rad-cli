@@ -1,14 +1,18 @@
-"""YOLOv8x-seg training — two separate single-class checkpoints.
+"""YOLOv8x-seg training — single-class checkpoints per landmark.
 
-Per methodology brief §1.3, the upstream pipeline trains the segmentation
-model twice with identical hyperparameters but different single-class
-configs:
+Per methodology brief §1.3, the upstream pipeline trains the
+segmentation model with identical hyperparameters per target:
 
 - target="tooth"  → produces `weights/segmentation_tooth.pt`
 - target="bone"   → produces `weights/segmentation_bone.pt`
+- target="cej"    → produces `weights/segmentation_cej.pt`
+                    (v2 polyline pivot — supervision built via y-band
+                    clustering of DenPAR CEJ_Points; see
+                    `dental_rad_cli.data.denpar_adapter`)
 
-Both downstream into the rule layer for pattern (H vs A) classification
-and per-tooth bone-loss measurement.
+All downstream into the rule layer for pattern classification and per-
+tooth bone-loss measurement. The CEJ target replaces the Keypoint
+R-CNN CEJ head in the v2 architecture; bone is unchanged.
 
 Hyperparameters (brief §1.3, identical to detection except patience):
   epochs=200, imgsz=640, lr0=0.0001, optimizer='Adam', batch=4, patience=30.
@@ -31,7 +35,7 @@ _PATIENCE: Final[int] = 30
 
 
 def train(
-    target: Literal["tooth", "bone"],
+    target: Literal["tooth", "bone", "cej"],
     data_yaml: Path,
     weights_out: Path,
     epochs: int = 200,
@@ -39,10 +43,11 @@ def train(
     """Train a single-class YOLOv8x-seg model.
 
     Args:
-        target: Either "tooth" or "bone" — selects which single-class
-            checkpoint we are producing. This parameter is informational
-            for run naming; the actual class is dictated by the
-            `data_yaml` (which must declare `nc: 1, names: ['<target>']`).
+        target: One of "tooth", "bone", or "cej" — selects which
+            single-class checkpoint we are producing. This parameter
+            is informational for run naming; the actual class is
+            dictated by the `data_yaml` (which must declare
+            `nc: 1, names: ['<target>']`).
         data_yaml: Path to Ultralytics segmentation dataset YAML.
         weights_out: Destination `.pt` path. Parent dirs created if needed.
         epochs: Training epochs (default 200 per brief).
@@ -50,8 +55,10 @@ def train(
     Returns:
         Absolute path to saved weights.
     """
-    if target not in ("tooth", "bone"):
-        raise ValueError(f"target must be 'tooth' or 'bone'; got {target!r}")
+    if target not in ("tooth", "bone", "cej"):
+        raise ValueError(
+            f"target must be 'tooth', 'bone', or 'cej'; got {target!r}"
+        )
 
     data_yaml = Path(data_yaml).resolve()
     weights_out = Path(weights_out).resolve()
@@ -92,7 +99,9 @@ if __name__ == "__main__":  # pragma: no cover
     import argparse
 
     parser = argparse.ArgumentParser(description="Train YOLOv8x-seg single-class.")
-    parser.add_argument("--target", choices=("tooth", "bone"), required=True)
+    parser.add_argument(
+        "--target", choices=("tooth", "bone", "cej"), required=True
+    )
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--epochs", type=int, default=200)
