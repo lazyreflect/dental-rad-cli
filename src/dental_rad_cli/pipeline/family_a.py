@@ -47,11 +47,12 @@ _MILD_MIN_MM: float = 2.0
 _MODERATE_MIN_MM: float = 4.0
 _SEVERE_MIN_MM: float = 6.0
 
-# Tolerance for "bone crest projects coronal to CEJ" — bone_y < cej_y
-# in image coordinates (y grows downward). A few px of slack absorbs
-# proto-mask resolution + skeletonization quantization without
-# flagging anatomically-correct teeth.
-_NEGATIVE_DIFF_PX_TOL: float = 3.0
+# Upper bound on a plausible CEJ→bone-crest mm distance. Beyond this,
+# the measurement is almost certainly a model error (e.g., the band
+# centerline lookup hit a neighboring tooth's annotation). Real
+# clinical bone loss tops out around 15-20 mm before tooth loss;
+# 25 mm is a safe ceiling that still catches catastrophic errors.
+_MAX_PLAUSIBLE_MM: float = 25.0
 
 
 def band_centerline_y_at_x(band: np.ndarray, x: float) -> Optional[float]:
@@ -83,22 +84,33 @@ def site_mm(
 ) -> Optional[float]:
     """Compute mm CEJ→bone-crest at one site (mesial or distal).
 
+    Uses absolute distance: ``|bone_y - cej_y| / px_per_mm``. The
+    absolute is load-bearing — DenPAR mixes maxillary and mandibular
+    periapicals. In mandibular PAs the crown is at the top of the
+    image so bone is at higher y than CEJ (bone_y - cej_y > 0). In
+    maxillary PAs the crown is at the bottom and the root points up,
+    so anatomically-correct bone-crest sits at LOWER y than CEJ
+    (bone_y - cej_y < 0). A signed check would incorrectly reject the
+    maxillary half of the dataset (24% rejection rate observed on
+    the GT-band smoke test before this fix).
+
+    Jaw-aware signed measurement is a v0.5 concern: combine with FDI
+    numbering from the parallel `dental-tooth-numbering` substrate to
+    know maxillary vs mandibular per tooth, then validate the sign
+    against expected anatomy.
+
     Returns None when either landmark is missing, calibration is
-    invalid, or the bone-crest projects meaningfully coronal to the
-    CEJ (an anatomically-impossible case — usually a model error,
-    indistinguishable from healthy at the metric layer).
+    invalid, or the absolute distance exceeds `_MAX_PLAUSIBLE_MM`
+    (catastrophic model error — neighboring-tooth pollution etc.).
     """
     if cej_y is None or bone_y is None:
         return None
     if px_per_mm <= 0:
         return None
-    diff_px = bone_y - cej_y
-    if diff_px < -_NEGATIVE_DIFF_PX_TOL:
+    mm = abs(bone_y - cej_y) / px_per_mm
+    if mm > _MAX_PLAUSIBLE_MM:
         return None
-    # Clamp small-negative noise to 0 (within tolerance — model rounding).
-    if diff_px < 0:
-        diff_px = 0.0
-    return float(diff_px / px_per_mm)
+    return float(mm)
 
 
 def severity_tier_mm(mm: Optional[float]) -> Optional[SeverityTier]:
@@ -155,7 +167,7 @@ def per_tooth_family_a(
             elif px_per_mm <= 0:
                 reason = "no_calibration"
             else:
-                reason = "bone_coronal_to_cej"
+                reason = "implausible_mm"
             return BoneLossSite(
                 pct=None, tier=None, reason=reason, mm_estimate=None
             )
