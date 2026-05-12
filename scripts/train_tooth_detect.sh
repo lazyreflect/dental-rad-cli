@@ -5,7 +5,7 @@
 . "$(dirname "$0")/_common.sh"
 activate_venv
 
-: "${DATA_YAML:=${DATA_ROOT}/yolo_detect/dataset.yaml}"
+: "${DATA_YAML:=${DATA_ROOT}/yolo_tooth_detect/dataset.yaml}"
 : "${WEIGHTS_OUT:=${WEIGHTS_DIR}/tooth_detect.pt}"
 : "${EPOCHS:=200}"
 

@@ -12,7 +12,9 @@ export REPO_ROOT
 : "${VENV_DIR:=${REPO_ROOT}/.venv}"
 
 # Default dataset / weights / logs roots; override via env to suit the host.
-: "${DATA_ROOT:=${REPO_ROOT}/data/denpar/prepared}"
+# DATA_ROOT points at the prepared-datasets parent dir written by
+# scripts/prepare_datasets.{sh,ps1} -> data/prepared/{yolo_*, coco_*}.
+: "${DATA_ROOT:=${REPO_ROOT}/data/prepared}"
 : "${WEIGHTS_DIR:=${REPO_ROOT}/weights}"
 : "${LOGS_DIR:=${REPO_ROOT}/logs}"
 

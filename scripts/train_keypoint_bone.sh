@@ -4,7 +4,7 @@
 . "$(dirname "$0")/_common.sh"
 activate_venv
 
-: "${DATASET_DIR:=${DATA_ROOT}/keypoints}"
+: "${DATASET_DIR:=${DATA_ROOT}/coco_keypoints}"
 : "${WEIGHTS_OUT:=${WEIGHTS_DIR}/keypoint_bone.pt}"
 : "${EPOCHS:=200}"
 

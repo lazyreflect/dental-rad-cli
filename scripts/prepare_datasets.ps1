@@ -28,7 +28,7 @@ python -c @"
 from pathlib import Path
 from dental_rad_cli.data.denpar_adapter import build_yolo_dataset, build_coco_keypoints
 
-root = Path('data/denpar/Dataset')
+root = Path('data/denpar')   # adapter's _split_dir prepends 'Dataset/' internally
 out  = Path('data/prepared')
 
 print('[1/4] YOLO tooth_detect ...')

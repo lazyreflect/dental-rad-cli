@@ -4,7 +4,7 @@
 . "$(dirname "$0")/_common.sh"
 activate_venv
 
-: "${DATA_YAML:=${DATA_ROOT}/yolo_seg_bone/dataset.yaml}"
+: "${DATA_YAML:=${DATA_ROOT}/yolo_bone_seg/dataset.yaml}"
 : "${WEIGHTS_OUT:=${WEIGHTS_DIR}/segmentation_bone.pt}"
 : "${EPOCHS:=200}"
 
