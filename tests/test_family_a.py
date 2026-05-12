@@ -1,0 +1,228 @@
+"""Tests for `dental_rad_cli.pipeline.family_a`.
+
+Pure-math unit tests of the apex-free mm CEJ→bone-crest head.
+Validates orientation-agnostic distance, AAP tier mapping, the
+sanity cap, and per-tooth site construction from synthetic band
+masks.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+from dental_rad_cli.pipeline.family_a import (
+    band_centerline_y_at_x,
+    calibrate_px_per_mm,
+    per_tooth_family_a,
+    severity_tier_mm,
+    site_mm,
+)
+
+
+# ---------------------------------------------------------------------------
+# site_mm — absolute distance + sanity cap
+# ---------------------------------------------------------------------------
+
+
+def test_site_mm_mandibular_orientation() -> None:
+    # Mandibular PA: crown at top, bone at higher y than CEJ.
+    # CEJ y=200, bone y=230, px_per_mm=10 → 3 mm.
+    assert site_mm(200.0, 230.0, 10.0) == 3.0
+
+
+def test_site_mm_maxillary_orientation() -> None:
+    # Maxillary PA: crown at bottom, bone at LOWER y than CEJ.
+    # CEJ y=300, bone y=270 → bone-y is negative diff. Absolute → 3 mm.
+    assert site_mm(300.0, 270.0, 10.0) == 3.0
+
+
+def test_site_mm_returns_zero_when_landmarks_coincide() -> None:
+    # CEJ and bone at the same y — anatomically near-zero bone loss.
+    assert site_mm(200.0, 200.0, 10.0) == 0.0
+
+
+def test_site_mm_none_when_cej_missing() -> None:
+    assert site_mm(None, 230.0, 10.0) is None
+
+
+def test_site_mm_none_when_bone_missing() -> None:
+    assert site_mm(200.0, None, 10.0) is None
+
+
+def test_site_mm_none_when_calibration_invalid() -> None:
+    assert site_mm(200.0, 230.0, 0.0) is None
+    assert site_mm(200.0, 230.0, -1.0) is None
+
+
+def test_site_mm_rejects_implausibly_large_distance() -> None:
+    # 30 mm bone loss is past the sanity cap (25 mm).
+    assert site_mm(100.0, 400.0, 10.0) is None  # 300 px / 10 = 30 mm
+
+
+def test_site_mm_accepts_distance_at_cap() -> None:
+    # Exactly at the 25 mm cap is accepted.
+    assert site_mm(100.0, 350.0, 10.0) == 25.0
+
+
+# ---------------------------------------------------------------------------
+# severity_tier_mm — AAP staging thresholds
+# ---------------------------------------------------------------------------
+
+
+def test_severity_tier_below_mild_is_none() -> None:
+    # < 2 mm = healthy, no tier assigned.
+    assert severity_tier_mm(1.5) is None
+    assert severity_tier_mm(0.0) is None
+
+
+def test_severity_tier_at_mild_boundary_is_mild() -> None:
+    # 2.0 mm is exactly the lower bound for mild.
+    assert severity_tier_mm(2.0) == "mild"
+
+
+def test_severity_tier_in_mild_range() -> None:
+    assert severity_tier_mm(3.0) == "mild"
+    assert severity_tier_mm(3.99) == "mild"
+
+
+def test_severity_tier_at_moderate_boundary_is_moderate() -> None:
+    assert severity_tier_mm(4.0) == "moderate"
+
+
+def test_severity_tier_in_moderate_range() -> None:
+    assert severity_tier_mm(5.0) == "moderate"
+    assert severity_tier_mm(5.99) == "moderate"
+
+
+def test_severity_tier_at_severe_boundary_is_severe() -> None:
+    assert severity_tier_mm(6.0) == "severe"
+
+
+def test_severity_tier_well_into_severe() -> None:
+    assert severity_tier_mm(15.0) == "severe"
+
+
+def test_severity_tier_none_in_none_out() -> None:
+    assert severity_tier_mm(None) is None
+
+
+# ---------------------------------------------------------------------------
+# band_centerline_y_at_x — column median
+# ---------------------------------------------------------------------------
+
+
+def test_band_centerline_returns_none_for_empty_column() -> None:
+    band = np.zeros((100, 100), dtype=bool)
+    assert band_centerline_y_at_x(band, 50.0) is None
+
+
+def test_band_centerline_returns_none_for_out_of_image_x() -> None:
+    band = np.ones((100, 100), dtype=bool)
+    assert band_centerline_y_at_x(band, -1.0) is None
+    assert band_centerline_y_at_x(band, 100.0) is None
+
+
+def test_band_centerline_single_pixel_column() -> None:
+    band = np.zeros((100, 100), dtype=bool)
+    band[42, 50] = True
+    assert band_centerline_y_at_x(band, 50.0) == 42.0
+
+
+def test_band_centerline_multi_pixel_column_is_median() -> None:
+    # Thick band column with pixels at y=10..30. Median = 20.
+    band = np.zeros((100, 100), dtype=bool)
+    band[10:31, 50] = True  # 21 pixels: 10..30 inclusive.
+    assert band_centerline_y_at_x(band, 50.0) == 20.0
+
+
+def test_band_centerline_rounds_fractional_x() -> None:
+    band = np.zeros((100, 100), dtype=bool)
+    band[42, 50] = True
+    # x=49.6 rounds to 50.
+    assert band_centerline_y_at_x(band, 49.6) == 42.0
+    # x=50.4 rounds to 50.
+    assert band_centerline_y_at_x(band, 50.4) == 42.0
+
+
+# ---------------------------------------------------------------------------
+# per_tooth_family_a — end-to-end on synthetic bands
+# ---------------------------------------------------------------------------
+
+
+def test_per_tooth_family_a_healthy_tooth_mandibular() -> None:
+    """Mandibular tooth: bbox at top, CEJ near crown, bone just below."""
+    cej_band = np.zeros((400, 400), dtype=bool)
+    bone_band = np.zeros((400, 400), dtype=bool)
+    # CEJ at y=100, bone at y=110 → 10 px = 1 mm at px_per_mm=10.
+    cej_band[95:106, :] = True
+    bone_band[105:116, :] = True
+    bbox = (50.0, 50.0, 150.0, 300.0)
+    mesial, distal = per_tooth_family_a(cej_band, bone_band, bbox, 10.0)
+    # Both sites should produce ~1 mm, tier=None (sub-mild).
+    assert mesial.mm_estimate is not None
+    assert 0.5 < mesial.mm_estimate < 1.5
+    assert mesial.tier is None  # healthy
+    assert distal.mm_estimate is not None
+    assert 0.5 < distal.mm_estimate < 1.5
+
+
+def test_per_tooth_family_a_severe_loss_maxillary() -> None:
+    """Maxillary tooth: CEJ at y=300, bone-crest at y=240 (60 px = 6 mm)."""
+    cej_band = np.zeros((400, 400), dtype=bool)
+    bone_band = np.zeros((400, 400), dtype=bool)
+    cej_band[295:306, :] = True  # CEJ centerline at y=300
+    bone_band[235:246, :] = True  # bone centerline at y=240 (above CEJ)
+    bbox = (50.0, 50.0, 150.0, 350.0)
+    mesial, distal = per_tooth_family_a(cej_band, bone_band, bbox, 10.0)
+    # Both sites should produce ~6 mm, tier=severe.
+    assert mesial.mm_estimate is not None
+    assert 5.5 < mesial.mm_estimate < 6.5
+    assert mesial.tier == "severe"
+    assert distal.tier == "severe"
+
+
+def test_per_tooth_family_a_no_cej_at_site() -> None:
+    cej_band = np.zeros((400, 400), dtype=bool)
+    bone_band = np.zeros((400, 400), dtype=bool)
+    # CEJ exists only at x=100..150; mesial=50 won't find it.
+    cej_band[95:106, 100:151] = True
+    bone_band[125:136, :] = True
+    bbox = (50.0, 50.0, 150.0, 300.0)
+    mesial, distal = per_tooth_family_a(cej_band, bone_band, bbox, 10.0)
+    # Mesial site (x=50) — no CEJ pixel → reason = "no_cej_at_site".
+    assert mesial.mm_estimate is None
+    assert mesial.reason == "no_cej_at_site"
+    # Distal site (x=150) — both bands present → mm computed.
+    assert distal.mm_estimate is not None
+
+
+# ---------------------------------------------------------------------------
+# calibrate_px_per_mm
+# ---------------------------------------------------------------------------
+
+
+def test_calibrate_px_per_mm_returns_none_for_empty_input() -> None:
+    assert calibrate_px_per_mm([]) is None
+
+
+def test_calibrate_px_per_mm_returns_none_for_degenerate_bboxes() -> None:
+    # Zero-height bboxes — skip.
+    assert calibrate_px_per_mm([(0.0, 100.0, 50.0, 100.0)]) is None
+
+
+def test_calibrate_px_per_mm_uses_median() -> None:
+    # Heights 100, 200, 300 — median 200. 200 / 21 ≈ 9.52.
+    bboxes = [
+        (0.0, 0.0, 50.0, 100.0),
+        (0.0, 0.0, 50.0, 200.0),
+        (0.0, 0.0, 50.0, 300.0),
+    ]
+    result = calibrate_px_per_mm(bboxes)
+    assert result is not None
+    assert abs(result - (200.0 / 21.0)) < 1e-6
+
+
+def test_calibrate_px_per_mm_respects_custom_anchor() -> None:
+    # Custom mean tooth height = 10 mm; bbox height 100 → 10 px/mm.
+    bboxes = [(0.0, 0.0, 50.0, 100.0)]
+    assert calibrate_px_per_mm(bboxes, mean_tooth_height_mm=10.0) == 10.0
