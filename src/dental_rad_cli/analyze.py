@@ -40,7 +40,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, ClassVar, Dict, List, Optional, Tuple
 
 from dental_rad_cli.schema import (
     AnalysisResult,
@@ -174,17 +174,37 @@ class ModelBundle:
 
     # --- Keypoint R-CNN models (CLAHE-enhanced RGB) --------------------
 
+    # Default num_keypoints per landmark — must match training-time slice
+    # (see ``training.keypoints._LANDMARK_NUM_KEYPOINTS``).
+    _LANDMARK_DEFAULT_KP: ClassVar[Dict[str, int]] = {
+        "keypoint_cej": 2,
+        "keypoint_bone": 2,
+        "keypoint_apex": 1,
+    }
+
     def _load_kprcnn(self, key: str) -> Any:
         import torch  # local import — heavy dep
 
         path = self._weight_path(key)
-        # State-dict-only load is the v0 convention (methodology brief
-        # gotcha #14). Subagent B writes the matching save shape.
-        state = torch.load(str(path), map_location="cpu")
-        from dental_rad_cli.training.preprocess import (  # type: ignore
-            build_keypoint_rcnn,
+        # The trainer (``training.keypoints.train``) saves a wrapper dict
+        # ``{state_dict, num_keypoints, num_classes, landmark, best_val_loss}``.
+        # Older runs may have saved a bare ``state_dict``; both are handled.
+        payload = torch.load(str(path), map_location="cpu")
+        if isinstance(payload, dict) and "state_dict" in payload:
+            state = payload["state_dict"]
+            num_keypoints = int(
+                payload.get("num_keypoints", self._LANDMARK_DEFAULT_KP[key])
+            )
+        else:
+            state = payload
+            num_keypoints = self._LANDMARK_DEFAULT_KP[key]
+
+        # Reuse the training-side model builder so the architecture
+        # matches the saved state_dict by construction.
+        from dental_rad_cli.training.keypoints import (  # type: ignore
+            _build_model as build_keypoint_rcnn,
         )
-        model = build_keypoint_rcnn(num_keypoints=2)
+        model = build_keypoint_rcnn(num_keypoints=num_keypoints)
         model.load_state_dict(state)
         model.eval()
         return model
@@ -240,37 +260,277 @@ def apply_clahe(rgb_image: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Stub inference stages (v0 scaffolding)
+# Device detection
 # ---------------------------------------------------------------------------
-#
-# v0 ships the orchestration shape. Each stage below has a signature
-# that future model integration (Subagent B's training output + a
-# follow-up wiring task) will populate. For the v0 dry-run pathway and
-# the unit tests, we provide a synthetic-results builder.
 
-def _run_tooth_detection(bundle: ModelBundle, rgb: Any) -> List[Dict[str, Any]]:
-    """Return list of tooth detections. v0: not wired."""
-    # Placeholder until weights ship + integration task wires the model.
-    # Implementation note: call bundle.get_tooth_detect()(rgb) and parse
-    # the Ultralytics result object.
-    return []
+
+def _detect_device() -> str:
+    """Return ``"cuda"`` / ``"mps"`` / ``"cpu"`` per available accelerator.
+
+    The keypoint R-CNN models honor this via ``.to(device)`` (Task 6);
+    Ultralytics models receive it as a ``device=`` kwarg.
+    """
+    try:
+        import torch  # local import — heavy dep
+    except ImportError:
+        return "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    # mps may exist as an attr but report unavailable on non-Apple-Silicon.
+    mps = getattr(torch.backends, "mps", None)
+    if mps is not None and getattr(mps, "is_available", lambda: False)():
+        return "mps"
+    return "cpu"
+
+
+# ---------------------------------------------------------------------------
+# Stage wirings
+# ---------------------------------------------------------------------------
+
+
+def _bbox_iou(
+    a: Tuple[float, float, float, float],
+    b: Tuple[float, float, float, float],
+) -> float:
+    """Axis-aligned IoU between two ``(x1, y1, x2, y2)`` bboxes."""
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2)
+    iy2 = min(ay2, by2)
+    iw = max(0.0, ix2 - ix1)
+    ih = max(0.0, iy2 - iy1)
+    inter = iw * ih
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    union = area_a + area_b - inter
+    if union <= 0.0:
+        return 0.0
+    return inter / union
+
+
+def _to_numpy(tensor_like: Any) -> Any:
+    """Convert a torch tensor (or already-numpy) to numpy without importing torch."""
+    import numpy as np
+
+    if hasattr(tensor_like, "detach"):
+        return tensor_like.detach().cpu().numpy()
+    if hasattr(tensor_like, "cpu"):
+        return tensor_like.cpu().numpy()
+    if hasattr(tensor_like, "numpy"):
+        return tensor_like.numpy()
+    return np.asarray(tensor_like)
+
+
+def _run_tooth_detection(
+    bundle: ModelBundle,
+    rgb: Any,
+    device: str = "cpu",
+) -> List[Dict[str, Any]]:
+    """Run YOLO tooth detection; return a list of detection dicts.
+
+    Each dict carries::
+
+        {
+            "bbox": (x1, y1, x2, y2),
+            "confidence": float,
+            "root_class": "single" | "double" | "unknown",
+            "fdi": str,   # geometric index (left-to-right by bbox-center x)
+        }
+
+    FDI numbering note: we do NOT attempt true ISO-3950 numbering — that
+    requires anatomy reasoning the model does not provide. The string
+    indices are opaque IDs for the rule layer (verified: aggregate's
+    quadrant logic gracefully drops non-permanent-FDI strings).
+    """
+    model = bundle.get_tooth_detect()
+    results = model.predict(
+        rgb, conf=0.5, iou=0.45, verbose=False, device=device,
+    )
+    if not results:
+        return []
+    res0 = results[0]
+    boxes = getattr(res0, "boxes", None)
+    if boxes is None or len(boxes) == 0:
+        return []
+
+    xyxy = _to_numpy(boxes.xyxy)
+    confs = _to_numpy(boxes.conf)
+    classes = _to_numpy(boxes.cls).astype(int)
+
+    raw: List[Dict[str, Any]] = []
+    # Upstream nc=3: 0=single-rooted, 1=double-rooted, 2=background.
+    # We pre-filter the bg class if it ever appears in predictions.
+    for i in range(len(xyxy)):
+        cls_id = int(classes[i])
+        if cls_id == 0:
+            root_class: str = "single"
+        elif cls_id == 1:
+            root_class = "double"
+        else:
+            # Class 2 (background) — should not appear in predictions; skip.
+            continue
+        x1, y1, x2, y2 = (float(v) for v in xyxy[i])
+        raw.append(
+            {
+                "bbox": (x1, y1, x2, y2),
+                "confidence": float(confs[i]),
+                "root_class": root_class,
+            }
+        )
+
+    # Geometric FDI assignment: number left-to-right by bbox-center x.
+    raw.sort(key=lambda d: 0.5 * (d["bbox"][0] + d["bbox"][2]))
+    for i, det in enumerate(raw, start=1):
+        det["fdi"] = str(i)
+    return raw
 
 
 def _run_keypoint_passes(
     bundle: ModelBundle,
     rgb_clahe: Any,
     detections: List[Dict[str, Any]],
+    device: str = "cpu",
 ) -> List[Dict[str, Any]]:
-    """Run the three keypoint passes (CEJ / bone-crest / apex)."""
-    return []
+    """Run CEJ / bone / apex Keypoint-RCNN passes; pair to tooth detections.
+
+    For each tooth in ``detections``, finds the highest-IoU predicted
+    instance from each landmark model (IoU threshold 0.3) and extracts
+    its keypoints.
+
+    Returns one dict per tooth, in the same order as ``detections``::
+
+        {
+            "fdi": str,
+            "cej": [(x,y), (x,y)] | None,        # 2 keypoints
+            "bone_crest": [(x,y), (x,y)] | None, # 2 keypoints
+            "apex": (x, y) | None,                # 1 keypoint
+        }
+    """
+    if not detections:
+        return []
+
+    import torch  # local heavy import
+
+    landmark_keys = {
+        "cej": ("keypoint_cej", bundle.get_keypoint_cej),
+        "bone": ("keypoint_bone", bundle.get_keypoint_bone),
+        "apex": ("keypoint_apex", bundle.get_keypoint_apex),
+    }
+
+    # rgb_clahe is HWC uint8; convert to CHW float32 in [0, 1] (matches
+    # training-time transform in ``training.keypoints.CocoKeypointSlice``).
+    tensor = (
+        torch.from_numpy(rgb_clahe).permute(2, 0, 1).float() / 255.0
+    ).to(device)
+    batch = [tensor]
+
+    # For each landmark, run inference and capture (bbox, keypoints) per
+    # predicted instance.
+    per_landmark_preds: Dict[str, List[Dict[str, Any]]] = {}
+    for landmark, (_wkey, getter) in landmark_keys.items():
+        model = getter()
+        model = model.to(device)
+        with torch.no_grad():
+            outs = model(batch)
+        if not outs:
+            per_landmark_preds[landmark] = []
+            continue
+        out0 = outs[0]
+        boxes = _to_numpy(out0.get("boxes")) if "boxes" in out0 else _to_numpy(out0["boxes"])
+        kps = _to_numpy(out0["keypoints"])
+        scores = _to_numpy(out0["scores"]) if "scores" in out0 else None
+
+        instances: List[Dict[str, Any]] = []
+        for i in range(len(boxes)):
+            bb = boxes[i]
+            instances.append(
+                {
+                    "bbox": (float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])),
+                    "keypoints": kps[i],  # shape (K, 3)
+                    "score": float(scores[i]) if scores is not None else 1.0,
+                }
+            )
+        per_landmark_preds[landmark] = instances
+
+    iou_threshold = 0.3
+    out_rows: List[Dict[str, Any]] = []
+    for det in detections:
+        det_bbox = det["bbox"]
+        row: Dict[str, Any] = {
+            "fdi": det.get("fdi", ""),
+            "cej": None,
+            "bone_crest": None,
+            "apex": None,
+        }
+        for landmark in ("cej", "bone", "apex"):
+            best_iou = iou_threshold
+            best_inst: Optional[Dict[str, Any]] = None
+            for inst in per_landmark_preds.get(landmark, []):
+                iou = _bbox_iou(det_bbox, inst["bbox"])
+                if iou > best_iou:
+                    best_iou = iou
+                    best_inst = inst
+            if best_inst is None:
+                continue
+            kp_arr = best_inst["keypoints"]  # (K, 3)
+            if landmark == "cej":
+                # 2 keypoints — mesial, distal (training-side slice order).
+                if kp_arr.shape[0] >= 2:
+                    row["cej"] = [
+                        (float(kp_arr[0, 0]), float(kp_arr[0, 1])),
+                        (float(kp_arr[1, 0]), float(kp_arr[1, 1])),
+                    ]
+            elif landmark == "bone":
+                if kp_arr.shape[0] >= 2:
+                    row["bone_crest"] = [
+                        (float(kp_arr[0, 0]), float(kp_arr[0, 1])),
+                        (float(kp_arr[1, 0]), float(kp_arr[1, 1])),
+                    ]
+            else:  # apex
+                if kp_arr.shape[0] >= 1:
+                    row["apex"] = (float(kp_arr[0, 0]), float(kp_arr[0, 1]))
+        out_rows.append(row)
+    return out_rows
 
 
 def _run_segmentation(
     bundle: ModelBundle,
     rgb: Any,
-) -> Tuple[List[Any], List[Any]]:
-    """Run tooth + bone segmentation. Returns (tooth_polys, bone_polys)."""
-    return [], []
+    device: str = "cpu",
+) -> Tuple[List[List[Tuple[float, float]]], List[List[Tuple[float, float]]]]:
+    """Run tooth + bone segmentation; return polygons per instance.
+
+    Each polygon is a ``list[(x, y)]`` of float pixel coords. Ultralytics
+    returns ``results[0].masks.xy`` as a list of ``np.ndarray`` of shape
+    ``(K, 2)`` per instance; we coerce to native tuples for downstream
+    rasterization with ``cv2.fillPoly``.
+    """
+
+    def _extract(yolo_model: Any) -> List[List[Tuple[float, float]]]:
+        results = yolo_model.predict(rgb, conf=0.5, verbose=False, device=device)
+        if not results:
+            return []
+        res0 = results[0]
+        masks = getattr(res0, "masks", None)
+        if masks is None:
+            return []
+        xy = getattr(masks, "xy", None)
+        if xy is None:
+            return []
+        out: List[List[Tuple[float, float]]] = []
+        for poly in xy:
+            # poly may be np.ndarray (N, 2) or already a list of pairs.
+            poly_np = _to_numpy(poly)
+            if poly_np.ndim != 2 or poly_np.shape[1] != 2 or len(poly_np) < 3:
+                continue
+            out.append([(float(p[0]), float(p[1])) for p in poly_np])
+        return out
+
+    tooth_polys = _extract(bundle.get_segmentation_tooth())
+    bone_polys = _extract(bundle.get_segmentation_bone())
+    return tooth_polys, bone_polys
 
 
 def _run_caries_detection(
@@ -315,28 +575,328 @@ def _run_caries_detection(
     return detect_caries(rgb, weights_path, tooth_bboxes=tooth_stubs or None)
 
 
+def _polygon_centroid(poly: List[Tuple[float, float]]) -> Tuple[float, float]:
+    """Cheap arithmetic-mean centroid (good enough for "is it inside the
+    tooth bbox" routing; not the area-weighted centroid).
+    """
+    if not poly:
+        return (0.0, 0.0)
+    sx = sum(p[0] for p in poly)
+    sy = sum(p[1] for p in poly)
+    n = float(len(poly))
+    return (sx / n, sy / n)
+
+
+def _bbox_contains(
+    bbox: Tuple[float, float, float, float],
+    point: Tuple[float, float],
+) -> bool:
+    x1, y1, x2, y2 = bbox
+    return x1 <= point[0] <= x2 and y1 <= point[1] <= y2
+
+
+def _rasterize_polygon(
+    poly: List[Tuple[float, float]],
+    shape: Tuple[int, int],
+) -> Any:
+    """Rasterize a polygon to a uint8 binary mask of given (H, W)."""
+    import cv2
+    import numpy as np
+
+    mask = np.zeros(shape, dtype=np.uint8)
+    if not poly:
+        return mask
+    pts = np.asarray(poly, dtype=np.int32).reshape(-1, 1, 2)
+    cv2.fillPoly(mask, [pts], 1)
+    return mask
+
+
 def _build_findings_from_stages(
     detections: List[Dict[str, Any]],
     keypoints: List[Dict[str, Any]],
-    tooth_polys: List[Any],
-    bone_polys: List[Any],
+    tooth_polys: List[List[Tuple[float, float]]],
+    bone_polys: List[List[Tuple[float, float]]],
     caries: List[CariesFinding],
-) -> Tuple[List[ToothFinding], Summary]:
+    image_shape: Optional[Tuple[int, int]] = None,
+) -> Tuple[List[ToothFinding], Summary, List[Any]]:
     """Compose rule-layer outputs into ToothFindings + Summary.
 
-    Imports the rule-layer modules lazily so a missing rule module
-    (e.g. while Subagent C is still landing files) does not break
-    dry-run mode.
+    ``image_shape`` is ``(H, W)`` used to rasterize polygons for the
+    pattern classifier. If ``None``, the pattern stage is skipped and
+    each tooth's pattern stays ``"unknown"``.
+
+    Returns ``(teeth, summary, low_confidence_findings)``.
     """
-    # Lazy imports — these modules may not exist yet at the time the
-    # dry-run path or unit tests run.
-    try:
-        from dental_rad_cli.pipeline import severity  # noqa: F401
-    except ImportError:
-        pass
-    # Future: invoke severity / pattern / aggregate / jaw_classify
-    # against the stage outputs. v0 returns an empty tree.
-    return [], Summary()
+    from dental_rad_cli.pipeline.severity import (
+        compute_bone_loss_pct, severity_tier,
+    )
+    from dental_rad_cli.pipeline.pattern import classify_pattern
+    from dental_rad_cli.pipeline.aggregate import (
+        aap_stage, quadrant_summary,
+    )
+    from dental_rad_cli.pipeline.jaw_classify import classify_jaw
+    from dental_rad_cli.schema import (
+        BoneLossPerSite,
+        BoneLossSite,
+        CariesSummaryEntry,
+        LowConfidenceFinding,
+        ToothKeypointsFull,
+        ToothWithKeypoints,
+        VerticalDefect,
+    )
+
+    kp_by_fdi: Dict[str, Dict[str, Any]] = {
+        kp.get("fdi", ""): kp for kp in keypoints if kp.get("fdi") is not None
+    }
+
+    # Group caries findings by their parent tooth — caries_inference
+    # already assigns a surface; we re-route by matching surface against
+    # the geometric "closest tooth" heuristic the inference helper used.
+    # The simplest correct mapping is: for each caries, find the tooth
+    # whose bbox contains the caries-bbox center; the tooth's FDI string
+    # becomes the routing key.
+    caries_by_fdi: Dict[str, List[CariesFinding]] = {}
+    unrouted_caries: List[CariesFinding] = []
+    for c in caries:
+        if c.bbox is None:
+            unrouted_caries.append(c)
+            continue
+        ccx = 0.5 * (c.bbox[0] + c.bbox[2])
+        ccy = 0.5 * (c.bbox[1] + c.bbox[3])
+        matched_fdi: Optional[str] = None
+        for det in detections:
+            if _bbox_contains(det["bbox"], (ccx, ccy)):
+                matched_fdi = det["fdi"]
+                break
+        if matched_fdi is None:
+            unrouted_caries.append(c)
+        else:
+            caries_by_fdi.setdefault(matched_fdi, []).append(c)
+
+    low_confidence: List[Any] = []
+    teeth: List[ToothFinding] = []
+    all_sites: List[BoneLossSite] = []
+    tooth_for_jaw: List[ToothWithKeypoints] = []
+    vertical_defects: List[VerticalDefect] = []
+    summary_caries: List[CariesSummaryEntry] = []
+
+    # Pre-rasterize the bone mask once — pattern uses it per tooth.
+    bone_mask = None
+    if image_shape is not None and bone_polys:
+        import numpy as np
+
+        bone_mask = np.zeros(image_shape, dtype=np.uint8)
+        for bp in bone_polys:
+            bone_mask |= _rasterize_polygon(bp, image_shape)
+
+    for det in detections:
+        fdi = det["fdi"]
+        kp_row = kp_by_fdi.get(fdi, {})
+
+        cej_pair = kp_row.get("cej")        # list[(x,y), (x,y)] | None
+        bone_pair = kp_row.get("bone_crest")
+        apex_pt = kp_row.get("apex")        # (x, y) | None
+
+        # Per-site bone-loss math. Mesial = first keypoint of each pair;
+        # distal = second. Apex is shared.
+        mesial_site: Optional[BoneLossSite] = None
+        distal_site: Optional[BoneLossSite] = None
+
+        if cej_pair is not None and bone_pair is not None and apex_pt is not None:
+            cej_m, cej_d = cej_pair[0], cej_pair[1]
+            bone_m, bone_d = bone_pair[0], bone_pair[1]
+            pct_m = compute_bone_loss_pct(cej_m, bone_m, apex_pt)
+            pct_d = compute_bone_loss_pct(cej_d, bone_d, apex_pt)
+            mesial_site = BoneLossSite(
+                pct=pct_m,
+                tier=severity_tier(pct_m),
+                reason=None if pct_m is not None else "incomputable",
+            )
+            distal_site = BoneLossSite(
+                pct=pct_d,
+                tier=severity_tier(pct_d),
+                reason=None if pct_d is not None else "incomputable",
+            )
+            all_sites.append(mesial_site)
+            all_sites.append(distal_site)
+            if pct_m is None:
+                low_confidence.append(
+                    LowConfidenceFinding(
+                        type="bone_loss",
+                        tooth=fdi,
+                        surface="mesial",
+                        reason="incomputable",
+                    )
+                )
+            if pct_d is None:
+                low_confidence.append(
+                    LowConfidenceFinding(
+                        type="bone_loss",
+                        tooth=fdi,
+                        surface="distal",
+                        reason="incomputable",
+                    )
+                )
+        else:
+            low_confidence.append(
+                LowConfidenceFinding(
+                    type="keypoint",
+                    tooth=fdi,
+                    reason="missing_landmarks",
+                )
+            )
+
+        # Build ToothKeypointsFull from the matched per-tooth landmarks.
+        # Per-keypoint confidence is not propagated from KP-RCNN (we'd
+        # need to track .scores per instance); we surface 1.0 when
+        # present and treat absence as None.
+        kp_full = ToothKeypointsFull(
+            cej_mesial=(cej_pair[0][0], cej_pair[0][1], 1.0) if cej_pair else None,
+            cej_distal=(cej_pair[1][0], cej_pair[1][1], 1.0) if cej_pair else None,
+            bone_crest_mesial=(bone_pair[0][0], bone_pair[0][1], 1.0) if bone_pair else None,
+            bone_crest_distal=(bone_pair[1][0], bone_pair[1][1], 1.0) if bone_pair else None,
+            apex=(apex_pt[0], apex_pt[1], 1.0) if apex_pt else None,
+        )
+
+        # Pattern classification — requires tooth-mask + bone-mask + at
+        # least one CEJ + bone-crest landmark.
+        pattern_label = "unknown"
+        if (
+            image_shape is not None
+            and bone_mask is not None
+            and cej_pair is not None
+            and bone_pair is not None
+            and tooth_polys
+        ):
+            # Find this tooth's polygon: bbox-center containment first;
+            # nearest-by-centroid fallback dropped (would risk pairing
+            # the wrong tooth — better to emit "unknown").
+            cx = 0.5 * (det["bbox"][0] + det["bbox"][2])
+            cy = 0.5 * (det["bbox"][1] + det["bbox"][3])
+            matched_poly: Optional[List[Tuple[float, float]]] = None
+            for tp in tooth_polys:
+                cen = _polygon_centroid(tp)
+                if _bbox_contains(det["bbox"], cen):
+                    matched_poly = tp
+                    break
+            if matched_poly is not None:
+                tooth_mask = _rasterize_polygon(matched_poly, image_shape)
+                pattern_label = classify_pattern(
+                    tooth_mask=tooth_mask,
+                    bone_mask=bone_mask,
+                    cej_landmarks=list(cej_pair) if cej_pair else [],
+                    bone_crest_landmarks=list(bone_pair) if bone_pair else [],
+                )
+
+        # Caries attached to this tooth.
+        tooth_caries = caries_by_fdi.get(fdi, [])
+        for c in tooth_caries:
+            summary_caries.append(
+                CariesSummaryEntry(
+                    tooth=fdi,
+                    surface=c.surface,
+                    depth=c.depth,
+                    confidence=c.confidence,
+                )
+            )
+            if c.confidence < 0.75:
+                low_confidence.append(
+                    LowConfidenceFinding(
+                        type="caries",
+                        tooth=fdi,
+                        surface=c.surface,
+                        confidence=c.confidence,
+                        reason="below_0.75_threshold",
+                    )
+                )
+
+        tooth_finding = ToothFinding(
+            fdi=fdi,
+            universal=fdi,
+            bbox=det["bbox"],
+            confidence=det.get("confidence", 0.0),
+            root_class=det.get("root_class", "unknown"),
+            keypoints=kp_full,
+            bone_loss=BoneLossPerSite(mesial=mesial_site, distal=distal_site),
+            pattern=pattern_label,  # type: ignore[arg-type]
+            caries=tooth_caries,
+        )
+        teeth.append(tooth_finding)
+
+        if pattern_label == "angular_vertical":
+            # Use the worst-pct site for the defect entry.
+            worst_pct: Optional[float] = None
+            for s in (mesial_site, distal_site):
+                if s is not None and s.pct is not None:
+                    if worst_pct is None or s.pct > worst_pct:
+                        worst_pct = s.pct
+            if worst_pct is not None:
+                vertical_defects.append(
+                    VerticalDefect(
+                        site=f"tooth_{fdi}",
+                        pct=worst_pct,
+                        confidence=det.get("confidence", 0.0),
+                    )
+                )
+
+        # Jaw classification input — CEJ-midpoint y and apex y.
+        cej_y: Optional[float] = None
+        if cej_pair is not None:
+            cej_y = 0.5 * (cej_pair[0][1] + cej_pair[1][1])
+        apex_y: Optional[float] = apex_pt[1] if apex_pt is not None else None
+        tooth_for_jaw.append(ToothWithKeypoints(cej_y=cej_y, apex_y=apex_y))
+
+    # Surface-level unrouted caries.
+    for c in unrouted_caries:
+        summary_caries.append(
+            CariesSummaryEntry(
+                tooth="unknown",
+                surface=c.surface,
+                depth=c.depth,
+                confidence=c.confidence,
+            )
+        )
+        if c.confidence < 0.75:
+            low_confidence.append(
+                LowConfidenceFinding(
+                    type="caries",
+                    surface=c.surface,
+                    confidence=c.confidence,
+                    reason="below_0.75_threshold",
+                )
+            )
+
+    jaw = classify_jaw(tooth_for_jaw)
+    stage = aap_stage(all_sites) if all_sites else "I"
+    quadrants_map = quadrant_summary(teeth)
+    quadrants = list(quadrants_map.values())
+
+    # Top-level pattern string: "generalized_<dominant>" if all-same;
+    # else mixed. We keep this descriptive — the rule layer downstream
+    # treats this as a free-form summary token.
+    if not teeth:
+        bone_loss_pattern = "unknown"
+    else:
+        patterns = {t.pattern for t in teeth}
+        if patterns == {"horizontal"}:
+            bone_loss_pattern = "generalized_horizontal"
+        elif "angular_vertical" in patterns and "horizontal" in patterns:
+            bone_loss_pattern = "mixed"
+        elif patterns == {"angular_vertical"}:
+            bone_loss_pattern = "generalized_angular_vertical"
+        else:
+            bone_loss_pattern = "unknown"
+
+    summary = Summary(
+        bone_loss_pattern=bone_loss_pattern,
+        aap_stage_estimate=stage,
+        jaw_classification=jaw,
+        vertical_defects=vertical_defects,
+        caries_findings=summary_caries,
+        quadrants=quadrants,
+    )
+
+    return teeth, summary, low_confidence
 
 
 # ---------------------------------------------------------------------------
@@ -595,16 +1155,19 @@ def analyze(
         rgb = _load_image_rgb(image_path)
         rgb_clahe = apply_clahe(rgb)
 
-        detections = _run_tooth_detection(bundle, rgb)
-        keypoints = _run_keypoint_passes(bundle, rgb_clahe, detections)
-        tooth_polys, bone_polys = _run_segmentation(bundle, rgb)
+        device = _detect_device()
+        height, width = int(rgb.shape[0]), int(rgb.shape[1])
+
+        detections = _run_tooth_detection(bundle, rgb, device=device)
+        keypoints = _run_keypoint_passes(bundle, rgb_clahe, detections, device=device)
+        tooth_polys, bone_polys = _run_segmentation(bundle, rgb, device=device)
         caries = _run_caries_detection(bundle, rgb, detections)
 
-        teeth, summary = _build_findings_from_stages(
+        teeth, summary, low_confidence = _build_findings_from_stages(
             detections, keypoints, tooth_polys, bone_polys, caries,
+            image_shape=(height, width),
         )
 
-        height, width = int(rgb.shape[0]), int(rgb.shape[1])
         image_meta = ImageMeta(
             path=image_path.name,
             width=width,
@@ -614,7 +1177,7 @@ def analyze(
         metadata = Metadata(
             models=bundle.model_versions(),
             runtime_seconds=time.perf_counter() - started,
-            device="cpu",
+            device=device,
             schema_version=SCHEMA_VERSION,
             dry_run=False,
         )
@@ -622,7 +1185,7 @@ def analyze(
             image=image_meta,
             teeth=teeth,
             summary=summary,
-            low_confidence_findings=[],
+            low_confidence_findings=low_confidence,
             metadata=metadata,
         )
         if emit_note_draft:
