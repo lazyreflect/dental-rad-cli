@@ -389,6 +389,16 @@ def per_tooth_landmarks_via_masks(
     ys_bone, xs_bone = np.where(bone_on_tooth)
     tooth_mid_x = (float(xs_tooth.min()) + float(xs_tooth.max())) / 2.0
 
+    # v0.8 experiment (REVERTED 2026-05-12): tried sampling bone
+    # landmark AT the CEJ x-coordinate (±10..30 px tolerance), to
+    # mirror the GT-derivation method and address the 907 middle-tooth
+    # contamination case. Result on dev (150 imgs, 212 sites): mean
+    # MAE dropped 0.723 → 0.684, BUT coverage dropped 76.5% → 70.2%
+    # AND the severe bucket (gt 6-8 mm) got worse (1.973 → 2.341)
+    # because the rule dropped 5 lower-error severe sites and left
+    # the 6 hardest unchanged. No real fix to severe-perio under-
+    # prediction; the mean improvement was metric gaming through
+    # abstention. Kept the half-tooth + most-coronal rule.
     def _bone_landmark(
         cej_pt: tuple[float, float], mesial_side: bool
     ) -> Optional[tuple[float, float]]:

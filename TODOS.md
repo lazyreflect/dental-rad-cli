@@ -21,6 +21,15 @@ further.
 | BR6 | OPEN | Top-N error FDI clustering: join `per_site_records` from benchmark JSON with DenPAR metadata XLSX (Arch/Site/FDI columns). Tests whether worst errors cluster on anterior teeth, which would tighten the GT-noise hypothesis from n=4 visual obs to systematic finding. ~5 LOC + dataframe merge. | After BR1, anytime |
 | BR7 | OPEN | SAM2 + LoRA timeboxed spike: 1-week budget. Foundation backbone with light landmark adapter. If it gets within 100 μm of v0.7 architecture ladder with ~100 LOC, the ladder is dead and we pivot. Bitter-lesson check. | After BR3 (if model ceiling well-characterized) AND after Joseph review |
 | BR8 | OPEN | Patient-level vs image-level split audit: verify DenPAR stem-IDs are unique patients or document multi-shot mapping. If dev/held-out share patients, the lock is leaky and must be regenerated. Dataset companion paper [Sci Data 2025 PMC s41597-025-05906-9] may document this. | Before any held-out result is reported as a benchmark number |
+| BR9 | OPEN | Investigate bone-mask extent at severe-perio sites. Hypothesis: bone segmentation model does NOT extend its mask down to the deep alveolar crest in severe-perio cases (mask stops near coronal level → algorithm correctly picks "most coronal apical to CEJ" but that's at the wrong place because the mask itself is short). Dump bone masks for 3-5 severe-bucket dev sites, compare mask extent to GT bone-crest y. If mask is short, the fix is training-side (labels / loss), not algorithm-side. | Before any more bone-landmark algorithmic experiments |
+
+## Benchmark-rigor negative results (BRneg-series)
+
+Architectural experiments tried and reverted. Keep so future-Claude doesn't redo.
+
+| ID | Date | Description | Outcome |
+|----|------|-------------|---------|
+| BRneg-1 | 2026-05-12 | **Sample bone-landmark at CEJ x ± 10..30 px tolerance** instead of "most-coronal apical-to-CEJ in mesial/distal half." Mirrored GT-derivation method. Motivation: 907 middle tooth showed half-tooth rule picks adjacent-tooth contamination. | REVERTED. Dev mean 0.723 → 0.684 (-39 μm) but coverage 76.5% → 70.2% AND severe bucket got WORSE (mean 1.973 → 2.341). Mean improvement came from abstaining on 19 lower-error sites, not from fixing the hard cases. Metric gaming, not architecture improvement. The 907-style contamination isn't representative of the severe-perio failure mode in aggregate. Evidence: `output/training-evidence/benchmark-eval-dev-2026-05-12T211651.json` |
 
 ## Research-report follow-ups (F1-F7)
 
