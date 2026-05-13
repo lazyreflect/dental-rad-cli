@@ -14,6 +14,7 @@ from dental_rad_cli.pipeline.family_a import (
     band_centerline_y_at_x,
     calibrate_px_per_mm,
     per_tooth_family_a,
+    per_tooth_landmarks_via_masks,
     severity_tier_mm,
     site_mm,
 )
@@ -226,3 +227,86 @@ def test_calibrate_px_per_mm_respects_custom_anchor() -> None:
     # Custom mean tooth height = 10 mm; bbox height 100 → 10 px/mm.
     bboxes = [(0.0, 0.0, 50.0, 100.0)]
     assert calibrate_px_per_mm(bboxes, mean_tooth_height_mm=10.0) == 10.0
+
+
+# ---------------------------------------------------------------------------
+# per_tooth_landmarks_via_masks — Lee/Kabir-style anatomical landmarks
+# ---------------------------------------------------------------------------
+
+
+def _rect_mask(shape: tuple, x1: int, y1: int, x2: int, y2: int) -> np.ndarray:
+    m = np.zeros(shape, dtype=bool)
+    m[y1:y2, x1:x2] = True
+    return m
+
+
+def test_landmarks_via_masks_mandibular_orientation() -> None:
+    """Mandibular tooth: CEJ in upper part, bone below."""
+    shape = (400, 400)
+    tooth = _rect_mask(shape, 100, 50, 200, 300)
+    cej_band = _rect_mask(shape, 0, 100, 400, 116)
+    bone = _rect_mask(shape, 0, 140, 400, 400)
+    mesial, distal, pos = per_tooth_landmarks_via_masks(
+        tooth, cej_band, bone, px_per_mm=10.0,
+    )
+    assert mesial.mm_estimate is not None
+    assert 3.5 < mesial.mm_estimate < 4.5  # ~40 px / 10 = 4 mm
+    assert pos["cej_mesial"][0] == 100.0  # leftmost CEJ-on-tooth = mesial edge
+    assert pos["cej_distal"][0] == 199.0
+    # Bone landmarks are inside the tooth + apical to CEJ.
+    assert pos["bone_mesial"][1] > pos["cej_mesial"][1]  # bone below CEJ
+
+
+def test_landmarks_via_masks_maxillary_orientation() -> None:
+    """Maxillary tooth: CEJ in lower part, bone above."""
+    shape = (400, 400)
+    tooth = _rect_mask(shape, 100, 100, 200, 350)
+    cej_band = _rect_mask(shape, 0, 290, 400, 306)
+    bone = _rect_mask(shape, 0, 0, 400, 240)
+    mesial, distal, pos = per_tooth_landmarks_via_masks(
+        tooth, cej_band, bone, px_per_mm=10.0,
+    )
+    assert mesial.mm_estimate is not None
+    # Inverted orientation handled: bone_y < cej_y, abs distance still positive.
+    assert pos["bone_mesial"][1] < pos["cej_mesial"][1]  # bone above CEJ
+    assert 4.5 < mesial.mm_estimate < 5.5  # ~51 px / 10 = 5.1 mm
+
+
+def test_landmarks_via_masks_no_cej_overlap_returns_none() -> None:
+    shape = (400, 400)
+    tooth = _rect_mask(shape, 100, 50, 200, 300)
+    cej_band = _rect_mask(shape, 0, 350, 400, 360)  # CEJ band below tooth
+    bone = _rect_mask(shape, 0, 200, 400, 400)
+    mesial, distal, pos = per_tooth_landmarks_via_masks(
+        tooth, cej_band, bone, px_per_mm=10.0,
+    )
+    assert pos is None
+    assert mesial.reason == "no_cej_at_site"
+
+
+def test_landmarks_via_masks_no_bone_overlap_returns_reason() -> None:
+    shape = (400, 400)
+    tooth = _rect_mask(shape, 100, 50, 200, 300)
+    cej_band = _rect_mask(shape, 0, 100, 400, 116)
+    bone = _rect_mask(shape, 250, 0, 400, 400)  # bone away from tooth
+    mesial, distal, pos = per_tooth_landmarks_via_masks(
+        tooth, cej_band, bone, px_per_mm=10.0,
+    )
+    assert pos is not None
+    assert pos["cej_mesial"] is not None
+    assert pos["bone_mesial"] is None
+    assert mesial.reason == "no_bone_at_site"
+
+
+def test_landmarks_via_masks_implausible_distance_rejected() -> None:
+    """Cap rejects > 25 mm distance — for catastrophic model errors."""
+    shape = (400, 400)
+    tooth = _rect_mask(shape, 100, 50, 200, 350)
+    cej_band = _rect_mask(shape, 0, 60, 400, 76)
+    # Bone-on-tooth far below CEJ → > 25 mm at 5 px/mm.
+    bone = _rect_mask(shape, 0, 250, 400, 400)
+    mesial, distal, pos = per_tooth_landmarks_via_masks(
+        tooth, cej_band, bone, px_per_mm=5.0,
+    )
+    assert mesial.mm_estimate is None
+    assert mesial.reason == "implausible_mm"

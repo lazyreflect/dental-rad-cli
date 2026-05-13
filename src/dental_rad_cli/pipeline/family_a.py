@@ -203,6 +203,190 @@ def per_tooth_family_a(
     return mesial, distal
 
 
+def per_tooth_landmarks_via_masks(
+    tooth_mask: np.ndarray,
+    cej_band: np.ndarray,
+    bone_mask: np.ndarray,
+    px_per_mm: float,
+) -> tuple[
+    BoneLossSite,
+    BoneLossSite,
+    Optional[dict[str, Optional[tuple[float, float]]]],
+]:
+    """Anatomically-correct CEJ + bone-crest landmarks via mask intersection.
+
+    Mirrors Lee/Kabir 2022's three-segmentation methodology: intersect
+    the CEJ band with the tooth mask to get "CEJ ON this tooth"; same
+    for bone. Then identify specific mesial/distal landmarks at the
+    extremal points of these intersections. This guarantees landmarks
+    sit ON the tooth surface — the same constraint a periodontal probe
+    walks along during clinical measurement.
+
+    The bbox-edge fallback in ``per_tooth_family_a`` placed landmarks
+    at ``(bbox.x1, band_centerline_y)`` — which is approximately at
+    the tooth's mesial edge but can be off by 5-30 px on noisy bboxes,
+    and the band-centerline y at that x may sit in the interproximal
+    bone septum rather than ON the tooth surface. This function fixes
+    that by anchoring every landmark to a pixel that is BOTH inside
+    the tooth mask AND inside the relevant band/mask.
+
+    Landmark definitions (mirroring clinical anatomy):
+
+    - **Mesial CEJ:** leftmost pixel of ``tooth_mask & cej_band``.
+      The mesial-most point on the tooth where the CEJ band crosses
+      the tooth's mesial surface.
+    - **Distal CEJ:** rightmost pixel of the same intersection.
+    - **Mesial bone-crest:** in the mesial half of the tooth, the
+      most-CORONAL pixel of ``tooth_mask & bone_mask`` that is apical
+      to the mesial CEJ. "Coronal" / "apical" direction is inferred
+      from the CEJ centroid y vs the tooth-mask centroid y (mandibular:
+      CEJ above center → apical = below; maxillary: CEJ below center
+      → apical = above).
+    - **Distal bone-crest:** same in the distal half.
+
+    mm distance is computed as ``|bone_y - cej_y| / px_per_mm`` —
+    vertical projection, approximating the tooth long axis. v0.6+
+    will replace this with a PCA-derived true long-axis projection
+    once we tune it against tilted-tooth cases.
+
+    Returns ``(mesial_site, distal_site, positions_dict)``. positions_dict
+    keys: ``cej_mesial``, ``cej_distal``, ``bone_mesial``, ``bone_distal``;
+    each value is ``(x, y)`` or ``None``. Returns ``(None, None, None)``
+    if no CEJ pixels overlap the tooth mask (no landmark possible).
+    """
+    cej_on_tooth = tooth_mask & cej_band
+    bone_on_tooth = tooth_mask & bone_mask
+
+    if not cej_on_tooth.any():
+        return (
+            BoneLossSite(
+                pct=None, tier=None, mm_estimate=None,
+                reason="no_cej_at_site",
+            ),
+            BoneLossSite(
+                pct=None, tier=None, mm_estimate=None,
+                reason="no_cej_at_site",
+            ),
+            None,
+        )
+
+    ys_cej, xs_cej = np.where(cej_on_tooth)
+    mesial_idx = int(np.argmin(xs_cej))
+    distal_idx = int(np.argmax(xs_cej))
+    cej_mesial = (float(xs_cej[mesial_idx]), float(ys_cej[mesial_idx]))
+    cej_distal = (float(xs_cej[distal_idx]), float(ys_cej[distal_idx]))
+
+    # Orientation: compare CEJ centroid y to tooth centroid y.
+    # CEJ is typically near the cervical region — close to the crown.
+    # If CEJ is in the upper half of the tooth mask → crown at top
+    # (mandibular orientation in image space) → apical direction is +y.
+    # Else maxillary → apical direction is -y.
+    ys_tooth, xs_tooth = np.where(tooth_mask)
+    if ys_tooth.size == 0:
+        return (
+            BoneLossSite(
+                pct=None, tier=None, mm_estimate=None,
+                reason="no_tooth_mask",
+            ),
+            BoneLossSite(
+                pct=None, tier=None, mm_estimate=None,
+                reason="no_tooth_mask",
+            ),
+            {
+                "cej_mesial": cej_mesial,
+                "cej_distal": cej_distal,
+                "bone_mesial": None,
+                "bone_distal": None,
+            },
+        )
+    tooth_cy = float(ys_tooth.mean())
+    cej_cy = (cej_mesial[1] + cej_distal[1]) / 2.0
+    apical_sign = 1.0 if cej_cy < tooth_cy else -1.0
+
+    # Find bone-crest landmark in each half of the tooth.
+    positions: dict[str, Optional[tuple[float, float]]] = {
+        "cej_mesial": cej_mesial,
+        "cej_distal": cej_distal,
+        "bone_mesial": None,
+        "bone_distal": None,
+    }
+
+    if not bone_on_tooth.any():
+        return (
+            BoneLossSite(
+                pct=None, tier=None, mm_estimate=None,
+                reason="no_bone_at_site",
+            ),
+            BoneLossSite(
+                pct=None, tier=None, mm_estimate=None,
+                reason="no_bone_at_site",
+            ),
+            positions,
+        )
+
+    ys_bone, xs_bone = np.where(bone_on_tooth)
+    tooth_mid_x = (float(xs_tooth.min()) + float(xs_tooth.max())) / 2.0
+
+    def _bone_landmark(
+        cej_pt: tuple[float, float], mesial_side: bool
+    ) -> Optional[tuple[float, float]]:
+        # Filter bone pixels to the relevant half of the tooth.
+        side_mask = xs_bone <= tooth_mid_x if mesial_side else xs_bone > tooth_mid_x
+        if not side_mask.any():
+            return None
+        ys_side = ys_bone[side_mask]
+        xs_side = xs_bone[side_mask]
+        # Filter to bone pixels apical to CEJ along the orientation axis.
+        cej_y = cej_pt[1]
+        if apical_sign > 0:  # apical = larger y
+            apical_mask = ys_side > cej_y
+        else:  # apical = smaller y
+            apical_mask = ys_side < cej_y
+        if not apical_mask.any():
+            return None
+        ys_apical = ys_side[apical_mask]
+        xs_apical = xs_side[apical_mask]
+        # Most-coronal pixel = closest to CEJ along the long axis.
+        if apical_sign > 0:
+            idx = int(np.argmin(ys_apical))  # smallest y = most coronal
+        else:
+            idx = int(np.argmax(ys_apical))  # largest y = most coronal
+        return (float(xs_apical[idx]), float(ys_apical[idx]))
+
+    bone_mesial = _bone_landmark(cej_mesial, mesial_side=True)
+    bone_distal = _bone_landmark(cej_distal, mesial_side=False)
+    positions["bone_mesial"] = bone_mesial
+    positions["bone_distal"] = bone_distal
+
+    def _site(
+        cej_pt: tuple[float, float], bone_pt: Optional[tuple[float, float]]
+    ) -> BoneLossSite:
+        if bone_pt is None:
+            return BoneLossSite(
+                pct=None, tier=None, mm_estimate=None,
+                reason="no_bone_at_site",
+            )
+        if px_per_mm <= 0:
+            return BoneLossSite(
+                pct=None, tier=None, mm_estimate=None,
+                reason="no_calibration",
+            )
+        mm = abs(bone_pt[1] - cej_pt[1]) / px_per_mm
+        if mm > _MAX_PLAUSIBLE_MM:
+            return BoneLossSite(
+                pct=None, tier=None, mm_estimate=None,
+                reason="implausible_mm",
+            )
+        return BoneLossSite(
+            pct=None,
+            tier=severity_tier_mm(mm),
+            mm_estimate=float(mm),
+            reason=None,
+        )
+
+    return _site(cej_mesial, bone_mesial), _site(cej_distal, bone_distal), positions
+
+
 def calibrate_px_per_mm(
     bboxes: list[tuple[float, float, float, float]],
     mean_tooth_height_mm: float = 21.0,
