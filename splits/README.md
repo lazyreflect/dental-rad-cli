@@ -36,15 +36,24 @@ Python 3.x versions.
 
 ## Known caveat: image-level vs patient-level
 
-DenPAR ships ~1000 radiographs with numeric stem IDs. Whether each stem
-maps to a unique patient or to multiple shots per patient is not
-documented in what we've verified. This split is **image-level**.
+DenPAR ships ~1000 radiographs with numeric stem IDs. **Audited
+2026-05-12 (BR8): lock confirmed patient-clean.** Evidence:
 
-If we later confirm that dev and held-out share patients, the split must
-be regenerated with patient-level stratification, and any
-held-out-derived numbers reported before that point must be re-derived.
+1. **DenPAR Sci Data 2025 paper** ([Nature s41597-025-05906-9](https://www.nature.com/articles/s41597-025-05906-9))
+   reports "440 male and 560 female patients" — 440 + 560 = 1000,
+   matching the image count exactly. Strongly implies 1 radiograph
+   per patient.
 
-Tracking this as open work item; see project handoff doc for context.
+2. **Local dhash audit** (`scripts/audit_dev_held_out_leakage.py`):
+   ZERO image perceptual-hash near-duplicates among the 200 Testing
+   images (Hamming ≤ 8). Metadata-signature collisions exist (31 in
+   Testing) but they reflect common PA view types across DIFFERENT
+   patients (e.g., "Lower right with FDIs 45-48" is shared by 21
+   different patients), not same-patient duplicates.
+
+Treat the held-out lock as patient-clean. If a future DenPAR release
+or author correspondence reveals multi-image patients, regenerate via
+`scripts/lock_held_out_split.py --force` with a documented rationale.
 
 ## Pre-lock observations that crossed into held-out
 
