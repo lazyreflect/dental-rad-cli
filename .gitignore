@@ -63,6 +63,7 @@ htmlcov/
 # scripts (scripts/dev_contact_sheet.py etc.). Keep the source
 # scripts in git; keep the output PNGs out.
 output/diagnostics/dev-contact-sheet/
+output/diagnostics/severe-sites/*.png
 
 # Notebooks (we don't ship Jupyter — methodology-reference reads them upstream)
 *.ipynb
