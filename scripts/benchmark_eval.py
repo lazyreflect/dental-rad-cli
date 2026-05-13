@@ -307,7 +307,19 @@ def main() -> int:
         "--limit", type=int, default=0,
         help="Limit to first N images of the split (0 = all). Diagnostic.",
     )
+    ap.add_argument(
+        "--landmark-rule", default=None,
+        help="Override the family_a bone-landmark rule. Sets "
+             "DENTAL_RAD_LANDMARK_RULE env var. Valid rules: "
+             "min_y_half (default) median_y_half max_y_half "
+             "min_y_at_cej_x median_y_at_cej_x max_y_at_cej_x wide_aware",
+    )
     args = ap.parse_args()
+
+    if args.landmark_rule is not None:
+        import os
+        os.environ["DENTAL_RAD_LANDMARK_RULE"] = args.landmark_rule
+        print(f"NOTE: landmark rule override = {args.landmark_rule}")
 
     if args.split == "held-out" and not args.confirm_held_out_touch:
         print(

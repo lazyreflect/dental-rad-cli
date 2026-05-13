@@ -237,12 +237,24 @@ def _erode_mask(mask: np.ndarray, px: int) -> np.ndarray:
     return eroded.astype(bool)
 
 
+_VALID_LANDMARK_RULES = (
+    "min_y_half",          # default: most coronal apical-to-CEJ in mesial/distal half
+    "median_y_half",       # median y of apical pixels in mesial/distal half
+    "max_y_half",          # apical-most pixel in mesial/distal half (over-pred risk)
+    "min_y_at_cej_x",      # min y within ±10 px of CEJ x (BRneg-1 — known to abstain)
+    "median_y_at_cej_x",   # median y within ±10 px of CEJ x
+    "max_y_at_cej_x",      # apical-most within ±10 px of CEJ x
+    "wide_aware",          # if y-spread > 50 px use median_y_half, else min_y_half
+)
+
+
 def per_tooth_landmarks_via_masks(
     tooth_mask: np.ndarray,
     cej_band: np.ndarray,
     bone_mask: np.ndarray,
     px_per_mm: float,
     bone_erosion_px: int = _BONE_EROSION_PX_DEFAULT,
+    landmark_rule: Optional[str] = None,
 ) -> tuple[
     BoneLossSite,
     BoneLossSite,
@@ -389,41 +401,91 @@ def per_tooth_landmarks_via_masks(
     ys_bone, xs_bone = np.where(bone_on_tooth)
     tooth_mid_x = (float(xs_tooth.min()) + float(xs_tooth.max())) / 2.0
 
-    # v0.8 experiment (REVERTED 2026-05-12): tried sampling bone
-    # landmark AT the CEJ x-coordinate (±10..30 px tolerance), to
-    # mirror the GT-derivation method and address the 907 middle-tooth
-    # contamination case. Result on dev (150 imgs, 212 sites): mean
-    # MAE dropped 0.723 → 0.684, BUT coverage dropped 76.5% → 70.2%
-    # AND the severe bucket (gt 6-8 mm) got worse (1.973 → 2.341)
-    # because the rule dropped 5 lower-error severe sites and left
-    # the 6 hardest unchanged. No real fix to severe-perio under-
-    # prediction; the mean improvement was metric gaming through
-    # abstention. Kept the half-tooth + most-coronal rule.
+    # Rule history:
+    # - min_y_half (default): "most coronal apical to CEJ in mesial/distal half"
+    # - min_y_at_cej_x (BRneg-1, 2026-05-12): mirrors GT derivation —
+    #   sample bone-on-tooth at CEJ x ±10..30 px tolerance, pick min y.
+    #   Result on dev: mean 0.723 → 0.684 BUT coverage 76.5% → 70.2%
+    #   AND severe bucket WORSE (1.973 → 2.341). Reverted as default.
+    # - BR9 (2026-05-12 night): bone-mask extent dissection on 34
+    #   severe dev sites found 62% have mask_reaches_deep AND have
+    #   coronal-contamination → "min y" picks shallow from a mask
+    #   that contains the deep answer. Multiple rules under eval.
+    if landmark_rule is None:
+        import os
+        landmark_rule = os.environ.get(
+            "DENTAL_RAD_LANDMARK_RULE", "min_y_half"
+        )
+    if landmark_rule not in _VALID_LANDMARK_RULES:
+        raise ValueError(f"unknown landmark_rule {landmark_rule!r}; "
+                         f"valid: {_VALID_LANDMARK_RULES}")
+
     def _bone_landmark(
         cej_pt: tuple[float, float], mesial_side: bool
     ) -> Optional[tuple[float, float]]:
-        # Filter bone pixels to the relevant half of the tooth.
-        side_mask = xs_bone <= tooth_mid_x if mesial_side else xs_bone > tooth_mid_x
-        if not side_mask.any():
-            return None
-        ys_side = ys_bone[side_mask]
-        xs_side = xs_bone[side_mask]
-        # Filter to bone pixels apical to CEJ along the orientation axis.
+        cej_x = cej_pt[0]
         cej_y = cej_pt[1]
-        if apical_sign > 0:  # apical = larger y
-            apical_mask = ys_side > cej_y
-        else:  # apical = smaller y
-            apical_mask = ys_side < cej_y
+        # Step 1: select candidate bone pixels by rule's filter.
+        if landmark_rule.endswith("_at_cej_x"):
+            tol = 10
+            x_mask = np.abs(xs_bone - cej_x) <= tol
+            while not x_mask.any() and tol < 30:
+                tol += 5
+                x_mask = np.abs(xs_bone - cej_x) <= tol
+            if not x_mask.any():
+                return None
+            ys_candidates = ys_bone[x_mask]
+            xs_candidates = xs_bone[x_mask]
+        else:
+            # *_half family + wide_aware
+            side_mask = (xs_bone <= tooth_mid_x if mesial_side
+                         else xs_bone > tooth_mid_x)
+            if not side_mask.any():
+                return None
+            ys_candidates = ys_bone[side_mask]
+            xs_candidates = xs_bone[side_mask]
+        # Step 2: keep only apical-to-CEJ pixels.
+        if apical_sign > 0:
+            apical_mask = ys_candidates > cej_y
+        else:
+            apical_mask = ys_candidates < cej_y
         if not apical_mask.any():
             return None
-        ys_apical = ys_side[apical_mask]
-        xs_apical = xs_side[apical_mask]
-        # Most-coronal pixel = closest to CEJ along the long axis.
-        if apical_sign > 0:
-            idx = int(np.argmin(ys_apical))  # smallest y = most coronal
-        else:
-            idx = int(np.argmax(ys_apical))  # largest y = most coronal
-        return (float(xs_apical[idx]), float(ys_apical[idx]))
+        ys_apical = ys_candidates[apical_mask]
+        xs_apical = xs_candidates[apical_mask]
+        # Step 3: pick the y by rule.
+        if landmark_rule in ("min_y_half", "min_y_at_cej_x"):
+            if apical_sign > 0:
+                idx = int(np.argmin(ys_apical))
+            else:
+                idx = int(np.argmax(ys_apical))
+            return (float(xs_apical[idx]), float(ys_apical[idx]))
+        if landmark_rule in ("max_y_half", "max_y_at_cej_x"):
+            if apical_sign > 0:
+                idx = int(np.argmax(ys_apical))
+            else:
+                idx = int(np.argmin(ys_apical))
+            return (float(xs_apical[idx]), float(ys_apical[idx]))
+        if landmark_rule in ("median_y_half", "median_y_at_cej_x"):
+            median_y = float(np.median(ys_apical))
+            # Pick the x of the pixel closest to median y.
+            idx = int(np.argmin(np.abs(ys_apical - median_y)))
+            return (float(xs_apical[idx]), median_y)
+        if landmark_rule == "wide_aware":
+            spread = float(ys_apical.max() - ys_apical.min())
+            if spread > 50.0:
+                # Wide → bias toward apical via median (avoids min-y
+                # contamination AND max-y over-prediction).
+                median_y = float(np.median(ys_apical))
+                idx = int(np.argmin(np.abs(ys_apical - median_y)))
+                return (float(xs_apical[idx]), median_y)
+            # Narrow → most-coronal works fine.
+            if apical_sign > 0:
+                idx = int(np.argmin(ys_apical))
+            else:
+                idx = int(np.argmax(ys_apical))
+            return (float(xs_apical[idx]), float(ys_apical[idx]))
+        raise AssertionError("unreachable")  # validated above
 
     bone_mesial = _bone_landmark(cej_mesial, mesial_side=True)
     bone_distal = _bone_landmark(cej_distal, mesial_side=False)
