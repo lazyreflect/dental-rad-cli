@@ -52,9 +52,27 @@ Outputs
     CEJ-band IoU (predicted vs GT-derived band)
     comparison vs published benchmarks
 
+Split discipline
+----------------
+
+As of 2026-05-12, DenPAR Testing is split into:
+  - dev (150 images, default for --split):  iterative architecture work
+  - held-out (50 images, --split=held-out): one-shot final eval only
+
+The default ``--split=dev`` enforces honest measurement during
+iteration. ``--split=held-out`` is the end-of-development surface;
+running it requires ``--confirm-held-out-touch`` AND a logged entry in
+``splits/HELD_OUT_TOUCHES.md``.
+
+The legacy ``--split=all`` mode (full 200) prints a warning and is kept
+only for reproducing pre-2026-05-12 numbers.
+
 Usage::
 
-    python scripts/benchmark_eval.py --weights weights/
+    python scripts/benchmark_eval.py --weights weights/             # dev
+    python scripts/benchmark_eval.py --split=all                    # legacy
+    python scripts/benchmark_eval.py --split=held-out \\
+        --confirm-held-out-touch                                    # final
 """
 
 from __future__ import annotations
@@ -244,27 +262,96 @@ def _percentile_stats(values: list[float]) -> dict:
     }
 
 
+def _load_split(splits_dir: Path, split: str) -> Optional[list[str]]:
+    """Return ordered list of stems for ``split``, or None for the
+    legacy 'all' mode (use full image dir glob)."""
+    if split == "all":
+        return None
+    fname = {"dev": "denpar_dev.txt",
+             "held-out": "denpar_held_out.txt"}[split]
+    path = splits_dir / fname
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Split file {path} not found. Run "
+            "`scripts/lock_held_out_split.py` first."
+        )
+    return [line.strip() for line in path.read_text().splitlines()
+            if line.strip()]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--weights", type=Path, default=Path("weights"))
     ap.add_argument("--denpar-root", type=Path, default=Path("data/denpar"))
+    ap.add_argument("--splits-dir", type=Path, default=Path("splits"))
     ap.add_argument(
-        "--out-json", type=Path,
-        default=Path("output/training-evidence")
-        / f"benchmark-eval-{time.strftime('%Y-%m-%dT%H%M%S')}.json",
+        "--split", choices=["dev", "held-out", "all"], default="dev",
+        help=("dev (default, 150 imgs) for iteration; held-out (50) for "
+              "final eval ONLY — requires --confirm-held-out-touch; "
+              "all (200, legacy) emits a warning."),
+    )
+    ap.add_argument(
+        "--confirm-held-out-touch", action="store_true",
+        help="Required when --split=held-out. Log entry in "
+             "splits/HELD_OUT_TOUCHES.md must be written FIRST.",
+    )
+    ap.add_argument(
+        "--out-json", type=Path, default=None,
+        help="Output JSON path (defaults to "
+             "output/training-evidence/benchmark-eval-<split>-<ts>.json).",
     )
     ap.add_argument(
         "--limit", type=int, default=0,
-        help="Limit to first N test images (0 = all)",
+        help="Limit to first N images of the split (0 = all). Diagnostic.",
     )
     args = ap.parse_args()
 
+    if args.split == "held-out" and not args.confirm_held_out_touch:
+        print(
+            "ERROR: --split=held-out requires --confirm-held-out-touch.\n"
+            "Held-out is one-shot. Before re-running with the flag, append\n"
+            "an entry to splits/HELD_OUT_TOUCHES.md explaining what number\n"
+            "is being read and why this is a justified end-of-development\n"
+            "touch (not iterative tuning).",
+            file=sys.stderr,
+        )
+        return 2
+
+    if args.split == "all":
+        print(
+            "WARN: --split=all uses the full 200-image Testing set, which\n"
+            "is the historical pre-lock surface. New decisions should use\n"
+            "--split=dev (150) and final eval --split=held-out (50).\n",
+            file=sys.stderr,
+        )
+
+    if args.out_json is None:
+        args.out_json = (
+            Path("output/training-evidence")
+            / f"benchmark-eval-{args.split}-{time.strftime('%Y-%m-%dT%H%M%S')}.json"
+        )
+
     testing = _split_dir(args.denpar_root, "Testing")
     images_dir = testing / "Images"
-    stems = sorted(p.stem for p in images_dir.glob("*.jpg"))
+
+    split_stems = _load_split(args.splits_dir, args.split)
+    if split_stems is None:
+        stems = sorted(p.stem for p in images_dir.glob("*.jpg"))
+    else:
+        all_on_disk = {p.stem for p in images_dir.glob("*.jpg")}
+        missing = [s for s in split_stems if s not in all_on_disk]
+        if missing:
+            print(
+                f"ERROR: split lists {len(missing)} stems not present on "
+                f"disk: {missing[:5]}...",
+                file=sys.stderr,
+            )
+            return 1
+        stems = sorted(split_stems)
+
     if args.limit > 0:
         stems = stems[: args.limit]
-    print(f"Benchmark eval on {len(stems)} test images.\n")
+    print(f"Benchmark eval — split={args.split} ({len(stems)} images).\n")
 
     bundle = _get_or_create_bundle(args.weights)
 
@@ -361,7 +448,8 @@ def main() -> int:
         n_pred_sites_when_gt / n_gt_sites if n_gt_sites > 0 else 0.0
     )
 
-    print(f"\n{'='*70}\nBENCHMARK EVAL — DenPAR Testing ({len(stems)} images)\n{'='*70}")
+    print(f"\n{'='*70}\nBENCHMARK EVAL — DenPAR Testing split={args.split} "
+          f"({len(stems)} images)\n{'='*70}")
     print(f"elapsed:               {elapsed:.0f}s")
     print(f"GT sites:              {n_gt_sites}")
     print(f"predicted (matched):   {n_pred_sites_when_gt} ({100*coverage:.1f}%)")

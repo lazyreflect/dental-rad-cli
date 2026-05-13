@@ -4,6 +4,24 @@ Carry-forward items from hour-0 v0 / v0.5 work. Organized by source so
 context isn't lost. Each row names a trigger condition — these are not
 "do soon," they're "do when this fires."
 
+## Benchmark-rigor follow-ups (BR-series)
+
+After the 2026-05-12 evening pivot to "exceed Overjet benchmark" framing,
+Karpathy's discipline applied to current state surfaced these. Sequenced
+in priority order — do BR1 → BR2 → BR3 before tuning architecture
+further.
+
+| ID | Status | Description | Trigger |
+|----|--------|-------------|---------|
+| BR1 | **DONE** | Lock 50-image DenPAR held-out split (seed=42). Default `benchmark_eval.py --split=dev`; held-out gated behind `--confirm-held-out-touch` + log entry in `splits/HELD_OUT_TOUCHES.md`. Dev mean MAE on 150 imgs = 0.723 (was 0.705 on 200; honest correction after un-leaking test set). | DONE 2026-05-12 |
+| BR2 | OPEN | "Become one with your data": contact-sheet the 150 dev images with model output overlay (predicted CEJ + bone-crest + GT for both). Sort by error, also random sample. Look at ~all of them. Build intuition before any more architecture tuning. | Before BR3-BR7 |
+| BR3 | OPEN | Sample N=50 random dev sites, rate each GT placement (clinically correct / suspect-anterior / suspect-other / unclear) by visual inspection. Compute label-noise-corrected MAE. Anchors how much of the 0.723 mean is the model vs the labels. Likely requires ~30 min of Joseph time. | After BR2 (need contact-sheet to inform sampling) |
+| BR4 | OPEN | Dumb baseline floor: implement `uniform 21 mm anchor + bbox-vertical-center landmark, no segmentation` baseline. Run on dev. Report its MAE as the "what does the pipeline buy us" anchor. ~30 LOC. | After BR1, anytime |
+| BR5 | OPEN | `root_class` accuracy validation: tooth detector outputs single/double/unknown but never validated against FDI-derived expected. Build cross-check on DenPAR Testing (using tooth-wise masks + FDI inference) before tuning anything that depends on `root_class` (e.g. A1 calibration). ~50 LOC. | Before A1 tooth-class-aware calibration |
+| BR6 | OPEN | Top-N error FDI clustering: join `per_site_records` from benchmark JSON with DenPAR metadata XLSX (Arch/Site/FDI columns). Tests whether worst errors cluster on anterior teeth, which would tighten the GT-noise hypothesis from n=4 visual obs to systematic finding. ~5 LOC + dataframe merge. | After BR1, anytime |
+| BR7 | OPEN | SAM2 + LoRA timeboxed spike: 1-week budget. Foundation backbone with light landmark adapter. If it gets within 100 μm of v0.7 architecture ladder with ~100 LOC, the ladder is dead and we pivot. Bitter-lesson check. | After BR3 (if model ceiling well-characterized) AND after Joseph review |
+| BR8 | OPEN | Patient-level vs image-level split audit: verify DenPAR stem-IDs are unique patients or document multi-shot mapping. If dev/held-out share patients, the lock is leaky and must be regenerated. Dataset companion paper [Sci Data 2025 PMC s41597-025-05906-9] may document this. | Before any held-out result is reported as a benchmark number |
+
 ## Research-report follow-ups (F1-F7)
 
 From `output/research/2026-05-11-caries-v0.5-paths-deep-dive.md` §9.
