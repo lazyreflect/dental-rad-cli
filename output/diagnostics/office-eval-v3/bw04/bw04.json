@@ -19,15 +19,20 @@
       "confidence": 0.507,
       "root_class": "single",
       "keypoints": {
+        "cej_mesial": [
+          22.0,
+          636.0,
+          0.8763927817344666
+        ],
         "cej_distal": [
-          61.853614807128906,
-          639.5,
+          38.0,
+          633.0,
           0.8763927817344666
         ]
       },
       "bone_loss": {
         "mesial": {
-          "reason": "no_landmarks_at_site"
+          "reason": "no_bone_at_site"
         },
         "distal": {
           "reason": "no_bone_at_site"
@@ -48,15 +53,20 @@
       "confidence": 0.803,
       "root_class": "single",
       "keypoints": {
+        "cej_mesial": [
+          47.0,
+          114.0,
+          0.8763927817344666
+        ],
         "cej_distal": [
-          352.8760070800781,
-          139.0,
+          323.0,
+          145.0,
           0.8763927817344666
         ]
       },
       "bone_loss": {
         "mesial": {
-          "reason": "no_landmarks_at_site"
+          "reason": "no_bone_at_site"
         },
         "distal": {
           "reason": "no_bone_at_site"
@@ -78,13 +88,13 @@
       "root_class": "single",
       "keypoints": {
         "cej_mesial": [
-          46.28873062133789,
-          644.5,
+          62.0,
+          624.0,
           0.8763927817344666
         ],
         "cej_distal": [
-          413.7121276855469,
-          686.5,
+          387.0,
+          633.0,
           0.8763927817344666
         ]
       },
@@ -112,19 +122,14 @@
       "root_class": "single",
       "keypoints": {
         "cej_mesial": [
-          339.9083557128906,
-          135.0,
+          354.0,
+          124.0,
           0.8763927817344666
         ],
         "cej_distal": [
-          570.3880615234375,
-          134.5,
+          536.0,
+          139.0,
           0.8763927817344666
-        ],
-        "bone_crest_distal": [
-          570.3880615234375,
-          47.0,
-          1.0
         ]
       },
       "bone_loss": {
@@ -132,8 +137,7 @@
           "reason": "no_bone_at_site"
         },
         "distal": {
-          "tier": "moderate",
-          "mm_estimate": 5.33
+          "reason": "no_bone_at_site"
         }
       },
       "pattern": "unknown",
@@ -152,13 +156,13 @@
       "root_class": "single",
       "keypoints": {
         "cej_mesial": [
-          381.5747375488281,
-          655.0,
+          400.0,
+          699.0,
           0.8763927817344666
         ],
         "cej_distal": [
-          631.7552490234375,
-          714.5,
+          591.0,
+          694.0,
           0.8763927817344666
         ]
       },
@@ -186,34 +190,22 @@
       "root_class": "single",
       "keypoints": {
         "cej_mesial": [
-          566.9920043945312,
-          134.0,
+          582.0,
+          118.0,
           0.8763927817344666
         ],
         "cej_distal": [
-          804.2348022460938,
-          133.0,
+          761.0,
+          143.0,
           0.8763927817344666
-        ],
-        "bone_crest_mesial": [
-          566.9920043945312,
-          45.0,
-          1.0
-        ],
-        "bone_crest_distal": [
-          804.2348022460938,
-          77.0,
-          1.0
         ]
       },
       "bone_loss": {
         "mesial": {
-          "tier": "moderate",
-          "mm_estimate": 5.42
+          "reason": "no_bone_at_site"
         },
         "distal": {
-          "tier": "mild",
-          "mm_estimate": 3.41
+          "reason": "no_bone_at_site"
         }
       },
       "pattern": "angular_vertical",
@@ -232,8 +224,13 @@
       "root_class": "single",
       "keypoints": {
         "cej_mesial": [
-          624.4913330078125,
-          713.5,
+          635.0,
+          698.0,
+          0.8763927817344666
+        ],
+        "cej_distal": [
+          822.0,
+          712.0,
           0.8763927817344666
         ]
       },
@@ -242,7 +239,7 @@
           "reason": "no_bone_at_site"
         },
         "distal": {
-          "reason": "no_landmarks_at_site"
+          "reason": "no_bone_at_site"
         }
       },
       "pattern": "unknown",
@@ -261,23 +258,32 @@
       "root_class": "single",
       "keypoints": {
         "cej_mesial": [
-          773.83984375,
-          132.5,
-          0.8763927817344666
+          844.0765991210938,
+          141.0336151123047,
+          1.0
+        ],
+        "cej_distal": [
+          846.0314331054688,
+          142.01039123535156,
+          1.0
         ],
         "bone_crest_mesial": [
-          773.83984375,
-          56.0,
+          830.1041870117188,
+          65.32341003417969,
+          1.0
+        ],
+        "bone_crest_distal": [
+          998.5133056640625,
+          341.13348388671875,
           1.0
         ]
       },
       "bone_loss": {
         "mesial": {
-          "tier": "moderate",
-          "mm_estimate": 4.66
+          "reason": "no_cej_at_site"
         },
         "distal": {
-          "reason": "no_landmarks_at_site"
+          "reason": "no_cej_at_site"
         }
       },
       "pattern": "angular_vertical",
@@ -286,7 +292,7 @@
   ],
   "summary": {
     "bone_loss_pattern": "unknown",
-    "aap_stage_estimate": "II",
+    "aap_stage_estimate": "I",
     "jaw_classification": "mandibular",
     "vertical_defects": [],
     "caries_findings": [],
@@ -340,12 +346,16 @@
     {
       "type": "bone_loss",
       "tooth": "4",
-      "surface": "mesial",
-      "reason": "no_bone_at_site"
+      "reason": "low_model_confidence"
     },
     {
       "type": "bone_loss",
       "tooth": "5",
+      "reason": "low_model_confidence"
+    },
+    {
+      "type": "bone_loss",
+      "tooth": "6",
       "reason": "low_model_confidence"
     },
     {
@@ -356,8 +366,7 @@
     {
       "type": "bone_loss",
       "tooth": "8",
-      "surface": "distal",
-      "reason": "no_landmarks_at_site"
+      "reason": "low_model_confidence"
     }
   ],
   "metadata": {
@@ -370,7 +379,7 @@
       "segmentation_cej": "segmentation_cej",
       "caries": "caries"
     },
-    "runtime_seconds": 0.748,
+    "runtime_seconds": 0.754,
     "device": "mps",
     "schema_version": "0.1",
     "dry_run": false

@@ -42,24 +42,23 @@
       "confidence": 0.81,
       "root_class": "single",
       "keypoints": {
-        "cej_distal": [
-          393.5965270996094,
-          123.5,
+        "cej_mesial": [
+          347.0,
+          107.0,
           0.844269871711731
         ],
-        "bone_crest_distal": [
-          393.5965270996094,
-          78.0,
-          1.0
+        "cej_distal": [
+          377.0,
+          136.0,
+          0.844269871711731
         ]
       },
       "bone_loss": {
         "mesial": {
-          "reason": "no_landmarks_at_site"
+          "reason": "no_bone_at_site"
         },
         "distal": {
-          "tier": "mild",
-          "mm_estimate": 2.72
+          "reason": "no_bone_at_site"
         }
       },
       "pattern": "unknown",
@@ -77,20 +76,25 @@
       "confidence": 0.783,
       "root_class": "single",
       "keypoints": {
+        "cej_mesial": [
+          516.0,
+          628.0,
+          0.844269871711731
+        ],
         "cej_distal": [
-          614.0667114257812,
-          621.0,
+          550.0,
+          616.0,
           0.844269871711731
         ],
         "bone_crest_mesial": [
-          109.66095733642578,
-          577.0,
+          199.0,
+          604.0,
           1.0
         ]
       },
       "bone_loss": {
         "mesial": {
-          "reason": "no_cej_at_site"
+          "mm_estimate": 1.44
         },
         "distal": {
           "reason": "no_bone_at_site"
@@ -112,33 +116,22 @@
       "root_class": "single",
       "keypoints": {
         "cej_mesial": [
-          388.23101806640625,
-          123.5,
+          404.0,
+          125.0,
           0.844269871711731
         ],
         "cej_distal": [
-          615.9622192382812,
-          131.0,
+          591.0,
+          142.0,
           0.844269871711731
-        ],
-        "bone_crest_mesial": [
-          388.23101806640625,
-          74.0,
-          1.0
-        ],
-        "bone_crest_distal": [
-          615.9622192382812,
-          100.5,
-          1.0
         ]
       },
       "bone_loss": {
         "mesial": {
-          "tier": "mild",
-          "mm_estimate": 2.96
+          "reason": "no_bone_at_site"
         },
         "distal": {
-          "mm_estimate": 1.83
+          "reason": "no_bone_at_site"
         }
       },
       "pattern": "unknown",
@@ -169,34 +162,22 @@
       "root_class": "single",
       "keypoints": {
         "cej_mesial": [
-          546.44091796875,
-          634.0,
+          594.0,
+          631.0,
           0.844269871711731
         ],
         "cej_distal": [
-          845.9445190429688,
-          663.0,
+          789.0,
+          650.0,
           0.844269871711731
-        ],
-        "bone_crest_mesial": [
-          546.44091796875,
-          674.5,
-          1.0
-        ],
-        "bone_crest_distal": [
-          845.9445190429688,
-          697.5,
-          1.0
         ]
       },
       "bone_loss": {
         "mesial": {
-          "tier": "mild",
-          "mm_estimate": 2.42
+          "reason": "no_bone_at_site"
         },
         "distal": {
-          "tier": "mild",
-          "mm_estimate": 2.07
+          "reason": "no_bone_at_site"
         }
       },
       "pattern": "horizontal",
@@ -227,33 +208,22 @@
       "root_class": "single",
       "keypoints": {
         "cej_mesial": [
-          614.5538330078125,
-          131.0,
+          636.0,
+          139.0,
           0.844269871711731
         ],
         "cej_distal": [
-          853.1163940429688,
-          142.5,
+          850.0,
+          130.0,
           0.844269871711731
-        ],
-        "bone_crest_mesial": [
-          614.5538330078125,
-          100.5,
-          1.0
-        ],
-        "bone_crest_distal": [
-          853.1163940429688,
-          99.0,
-          1.0
         ]
       },
       "bone_loss": {
         "mesial": {
-          "mm_estimate": 1.83
+          "reason": "no_bone_at_site"
         },
         "distal": {
-          "tier": "mild",
-          "mm_estimate": 2.6
+          "reason": "no_bone_at_site"
         }
       },
       "pattern": "unknown",
@@ -272,23 +242,22 @@
       "root_class": "single",
       "keypoints": {
         "cej_mesial": [
-          841.6204833984375,
-          142.5,
+          861.0,
+          153.0,
           0.844269871711731
         ],
-        "bone_crest_mesial": [
-          841.6204833984375,
-          96.0,
-          1.0
+        "cej_distal": [
+          889.0,
+          130.0,
+          0.844269871711731
         ]
       },
       "bone_loss": {
         "mesial": {
-          "tier": "mild",
-          "mm_estimate": 2.78
+          "reason": "no_bone_at_site"
         },
         "distal": {
-          "reason": "no_landmarks_at_site"
+          "reason": "no_bone_at_site"
         }
       },
       "pattern": "unknown",
@@ -354,12 +323,17 @@
     {
       "type": "bone_loss",
       "tooth": "2",
-      "surface": "mesial",
-      "reason": "no_landmarks_at_site"
+      "reason": "low_model_confidence"
     },
     {
       "type": "bone_loss",
       "tooth": "3",
+      "surface": "distal",
+      "reason": "no_bone_at_site"
+    },
+    {
+      "type": "bone_loss",
+      "tooth": "4",
       "reason": "low_model_confidence"
     },
     {
@@ -370,6 +344,11 @@
       "reason": "below_0.75_threshold"
     },
     {
+      "type": "bone_loss",
+      "tooth": "5",
+      "reason": "low_model_confidence"
+    },
+    {
       "type": "caries",
       "tooth": "5",
       "surface": "mesial",
@@ -378,9 +357,13 @@
     },
     {
       "type": "bone_loss",
+      "tooth": "6",
+      "reason": "low_model_confidence"
+    },
+    {
+      "type": "bone_loss",
       "tooth": "7",
-      "surface": "distal",
-      "reason": "no_landmarks_at_site"
+      "reason": "low_model_confidence"
     }
   ],
   "metadata": {
@@ -393,7 +376,7 @@
       "segmentation_cej": "segmentation_cej",
       "caries": "caries"
     },
-    "runtime_seconds": 0.768,
+    "runtime_seconds": 0.769,
     "device": "mps",
     "schema_version": "0.1",
     "dry_run": false

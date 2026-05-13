@@ -267,7 +267,7 @@
       "segmentation_cej": "segmentation_cej",
       "caries": "caries"
     },
-    "runtime_seconds": 0.769,
+    "runtime_seconds": 0.746,
     "device": "mps",
     "schema_version": "0.1",
     "dry_run": false

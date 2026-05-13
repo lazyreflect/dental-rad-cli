@@ -726,7 +726,11 @@ def _build_findings_from_stages(
     Returns ``(teeth, summary, low_confidence_findings)``.
     """
     from dental_rad_cli.pipeline.family_a import (
-        calibrate_px_per_mm, per_tooth_family_a, severity_tier_mm, site_mm,
+        calibrate_px_per_mm,
+        per_tooth_family_a,
+        per_tooth_landmarks_via_masks,
+        severity_tier_mm,
+        site_mm,
     )
     from dental_rad_cli.pipeline.pattern import classify_pattern
     from dental_rad_cli.pipeline.aggregate import (
@@ -831,9 +835,10 @@ def _build_findings_from_stages(
         distal_site: Optional[BoneLossSite] = None
         family_a_emitted = False
 
-        # v2 Family A pathway: apex-free mm CEJ→bone-crest. Runs first
-        # when the polyline model has confidence and we have a bone
-        # mask to query.
+        # v2.5 Family A pathway: anatomically-correct landmark detection
+        # via mask intersection (Lee/Kabir 2022) when the tooth mask is
+        # available; falls back to bbox-edge band centerlines when not.
+        # Both paths produce mm + tier + positions dict.
         family_a_positions: Optional[Dict[str, Tuple[float, float]]] = None
         if (
             use_family_a
@@ -842,32 +847,64 @@ def _build_findings_from_stages(
             and px_per_mm > 0
         ):
             from dental_rad_cli.pipeline.family_a import band_centerline_y_at_x
+            import numpy as np
 
-            mesial_site, distal_site = per_tooth_family_a(
-                cej_band, bone_mask, det["bbox"], px_per_mm,
-            )
-            family_a_emitted = (
-                mesial_site.mm_estimate is not None
-                or distal_site.mm_estimate is not None
-            )
-            # Synthesize landmark positions from the band centerlines so
-            # the render layer (which draws CEJ→bone-crest segments
-            # between two points) can show mm sites without keypoint
-            # predictions. None where the band didn't cross that bbox
-            # edge — render layer falls back gracefully. Pass bbox
-            # y-range so cross-frame contamination on BWs is rejected.
-            bx1, by1, bx2, by2 = det["bbox"]
-            bbox_y = (by1, by2)
-            cej_m_y = band_centerline_y_at_x(cej_band, bx1, bbox_y)
-            cej_d_y = band_centerline_y_at_x(cej_band, bx2, bbox_y)
-            bone_m_y = band_centerline_y_at_x(bone_mask, bx1, bbox_y)
-            bone_d_y = band_centerline_y_at_x(bone_mask, bx2, bbox_y)
-            family_a_positions = {
-                "cej_mesial": (bx1, cej_m_y) if cej_m_y is not None else None,
-                "cej_distal": (bx2, cej_d_y) if cej_d_y is not None else None,
-                "bone_mesial": (bx1, bone_m_y) if bone_m_y is not None else None,
-                "bone_distal": (bx2, bone_d_y) if bone_d_y is not None else None,
-            }
+            # Find this tooth's segmentation mask, if available, by
+            # bbox-centroid containment (same heuristic as the pattern
+            # classifier below).
+            tooth_poly: Optional[List[Tuple[float, float]]] = None
+            if tooth_polys and image_shape is not None:
+                for tp in tooth_polys:
+                    cen = _polygon_centroid(tp)
+                    if _bbox_contains(det["bbox"], cen):
+                        tooth_poly = tp
+                        break
+
+            if tooth_poly is not None and image_shape is not None:
+                # Anatomical-landmark path (Lee/Kabir-grade):
+                tooth_mask_per = _rasterize_polygon(
+                    tooth_poly, image_shape
+                ).astype(bool)
+                cej_band_bool = np.asarray(cej_band, dtype=bool)
+                bone_mask_bool = np.asarray(bone_mask, dtype=bool)
+                mesial_site, distal_site, anat_positions = (
+                    per_tooth_landmarks_via_masks(
+                        tooth_mask_per, cej_band_bool, bone_mask_bool,
+                        px_per_mm,
+                    )
+                )
+                if anat_positions is not None:
+                    family_a_positions = {
+                        k: v for k, v in anat_positions.items()
+                    }
+                family_a_emitted = (
+                    mesial_site.mm_estimate is not None
+                    or distal_site.mm_estimate is not None
+                )
+            else:
+                # Graceful fallback: no tooth mask for this tooth →
+                # bbox-edge band centerline approximation (the v2.0
+                # approach). Less anatomically accurate but functional
+                # when tooth segmentation didn't fire for this tooth.
+                mesial_site, distal_site = per_tooth_family_a(
+                    cej_band, bone_mask, det["bbox"], px_per_mm,
+                )
+                family_a_emitted = (
+                    mesial_site.mm_estimate is not None
+                    or distal_site.mm_estimate is not None
+                )
+                bx1, by1, bx2, by2 = det["bbox"]
+                bbox_y = (by1, by2)
+                cej_m_y = band_centerline_y_at_x(cej_band, bx1, bbox_y)
+                cej_d_y = band_centerline_y_at_x(cej_band, bx2, bbox_y)
+                bone_m_y = band_centerline_y_at_x(bone_mask, bx1, bbox_y)
+                bone_d_y = band_centerline_y_at_x(bone_mask, bx2, bbox_y)
+                family_a_positions = {
+                    "cej_mesial": (bx1, cej_m_y) if cej_m_y is not None else None,
+                    "cej_distal": (bx2, cej_d_y) if cej_d_y is not None else None,
+                    "bone_mesial": (bx1, bone_m_y) if bone_m_y is not None else None,
+                    "bone_distal": (bx2, bone_d_y) if bone_d_y is not None else None,
+                }
             if family_a_emitted:
                 if mesial_site.tier is not None:
                     all_sites.append(mesial_site)
