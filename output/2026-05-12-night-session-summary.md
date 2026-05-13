@@ -6,7 +6,7 @@ handoff. Goal of the night: execute the Karpathy moves on the BR-series
 queue, commit/push every checkpoint, log negative results to prevent
 re-tries.
 
-**HEAD at session end: [26ff399](https://github.com/lazyreflect/dental-rad-cli/commit/26ff399).** Tests still 147 green.
+**HEAD at session end: [219924e](https://github.com/lazyreflect/dental-rad-cli/commit/219924e).** Tests 154 green (147 + 7 new).
 Held-out split (50 images) was **not touched** at any point.
 
 ---
@@ -95,6 +95,9 @@ Extreme-bucket sites are all Lower-arch. Severe bucket: 6 Lower, 5 Upper.
 | [073aa24](https://github.com/lazyreflect/dental-rad-cli/commit/073aa24) | docs(eval): BRneg-1 record | CEJ-x sampling reverted (metric-gaming, not real fix) |
 | [b1dac5f](https://github.com/lazyreflect/dental-rad-cli/commit/b1dac5f) | feat(diagnostics): BR9 bone-mask extent | 62% of severe sites have masks reaching deep — algorithm fix-space confirmed |
 | [26ff399](https://github.com/lazyreflect/dental-rad-cli/commit/26ff399) | feat(eval): BR4 + BR6 + BRneg-2 sweep | dumb baseline + arch/site stratification + 6-rule landmark sweep negative result |
+| [50daf1e](https://github.com/lazyreflect/dental-rad-cli/commit/50daf1e) | docs: night-session summary for morning review | this doc |
+| [50e39aa](https://github.com/lazyreflect/dental-rad-cli/commit/50e39aa) | test(family_a): cover landmark_rule param | 7 new tests lock in the rule API; 147 → 154 passing |
+| [219924e](https://github.com/lazyreflect/dental-rad-cli/commit/219924e) | feat(eval): BR8 — DenPAR patient-level audit | lock confirmed patient-clean (440+560=1000 patients per Sci Data paper; ZERO image dhash near-duplicates in 200 Testing imgs) |
 
 ---
 
@@ -105,7 +108,7 @@ Extreme-bucket sites are all Lower-arch. Severe bucket: 6 Lower, 5 Upper.
 | BR3 | Hand-curate ~30 dev GT sites (rate clinically correct vs suspect) | 30-45 min | Tightens the GT-noise vs model-error split; bridge to BR10 |
 | BR5 | `root_class` accuracy validation | 0 (auto) | Enables tooth-class-aware calibration; bounded |
 | BR7 | SAM2 + LoRA timeboxed spike | 1 week author time, 0 Joseph | The bitter-lesson check; could obsolete the architecture ladder |
-| BR8 | DenPAR patient-level audit | 30 min — read companion paper / contact authors? | Critical: if dev/held-out share patients, the lock is leaky |
+| ~~BR8~~ | ~~DenPAR patient-level audit~~ | DONE — lock confirmed patient-clean | (closed) |
 | BR10 | Richer-representation landmark inference (morphology / intensity / learned head) | multi-day | Only path to fix the severe bucket per BRneg-2 |
 | BR11 | Reframe product narrative away from "beat Overjet 0.3" | 1-2 hr writing | Aligns external comms with the honest numbers |
 
@@ -142,11 +145,14 @@ biggest learnings are structural:
 ## Recommended next session start
 
 1. Read this doc (5 min).
-2. Decide which of BR3 / BR5 / BR7 / BR8 / BR10 / BR11 to prioritize.
-   - My call if forced: **BR8 first** (patient-level audit — cheap,
-     blocks held-out reporting), **BR11 next** (reframe narrative
-     while the work is fresh), **BR7 last** (the big spike).
-3. Don't touch held-out yet (still locked at 50 imgs untouched).
+2. Decide which of BR3 / BR5 / BR7 / BR10 / BR11 to prioritize.
+   - My call if forced: **BR11** (reframe narrative now while the
+     work is fresh and rigorous; this changes how every future
+     conversation about the product is framed), **BR10** (the
+     richer-representation landmark — multi-day, but the only
+     remaining algorithm-side path to fix severe bucket), then
+     **BR7** (SAM2 spike) only if BR10 stalls.
+3. Don't touch held-out yet (still locked at 50 imgs untouched; **patient-clean** per BR8 audit).
 4. If you want to validate any specific severe-bucket case from
    tonight, the dissection PNGs are in
    `output/diagnostics/severe-sites/` (gitignored; regenerate via
