@@ -59,6 +59,11 @@ examples/eval/output/       # generated annotation outputs
 htmlcov/
 .mypy_cache/
 
+# Bulky diagnostic galleries — reproducible via the relevant
+# scripts (scripts/dev_contact_sheet.py etc.). Keep the source
+# scripts in git; keep the output PNGs out.
+output/diagnostics/dev-contact-sheet/
+
 # Notebooks (we don't ship Jupyter — methodology-reference reads them upstream)
 *.ipynb
 .ipynb_checkpoints/

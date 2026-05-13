@@ -126,6 +126,9 @@ class SiteError:
     pred_mm: Optional[float]
     abs_err_mm: Optional[float]
     bbox_iou: float
+    bbox: Optional[tuple]  # GT tooth bbox (x1, y1, x2, y2) in image coords
+    image_w: Optional[int]
+    image_h: Optional[int]
 
 
 def _bbox_iou(a, b) -> float:
@@ -374,6 +377,10 @@ def main() -> int:
             continue
 
         img_path = images_dir / f"{stem}.jpg"
+        img_for_shape = cv2.imread(str(img_path))
+        if img_for_shape is None:
+            continue
+        img_h, img_w = img_for_shape.shape[:2]
         try:
             result = analyze(img_path, weights_dir=args.weights,
                              bundle=bundle, render=False)
@@ -435,6 +442,8 @@ def main() -> int:
                         stem=stem, fdi_idx=gt["fdi_idx"], surface=surface,
                         gt_mm=gt_mm, pred_mm=pred_mm, abs_err_mm=err,
                         bbox_iou=best_iou,
+                        bbox=tuple(gt["bbox"]),
+                        image_w=img_w, image_h=img_h,
                     ))
                 elif reason == "low_model_confidence":
                     n_low_model_conf_sites += 1
@@ -490,7 +499,7 @@ def main() -> int:
         "mm_mae_stats": err_stats,
         "gt_mm_stats": gt_stats,
         "benchmarks_mm_mae": _BENCHMARKS_MM_MAE,
-        "per_site_records": [r.__dict__ for r in per_site_records[:200]],
+        "per_site_records": [r.__dict__ for r in per_site_records],
     }
     args.out_json.write_text(json.dumps(payload, indent=2))
     print(f"\nwrote {args.out_json}")
