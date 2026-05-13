@@ -294,7 +294,19 @@ def per_tooth_landmarks_via_masks(
     # pixels that were systematically biasing the bone-crest landmark
     # coronal (closer to CEJ → under-prediction of severe-case mm).
     bone_clean = _erode_mask(bone_mask, bone_erosion_px) if bone_erosion_px > 0 else bone_mask
-    bone_on_tooth = tooth_mask & bone_clean
+    # v0.7: restrict bone-on-tooth to a ring just inside the tooth
+    # boundary. The naive ``tooth_mask & bone_mask`` includes bone
+    # pixels deep inside the tooth — the furcation/inter-radicular
+    # region of multi-rooted teeth has bone BETWEEN the roots that is
+    # inside the tooth bbox but anatomically NOT the alveolar bone
+    # crest. (Joseph's clinical observation: the bone landmark was
+    # landing in the furcation on bw01 tooth #4 distal.) The ring is
+    # the difference between the tooth mask and its erosion by 5 px →
+    # only bone pixels within 5 px of the tooth's outer boundary count
+    # as candidate bone-crest, rejecting interior bone.
+    tooth_eroded = _erode_mask(tooth_mask, 5)
+    tooth_boundary_ring = tooth_mask & ~tooth_eroded
+    bone_on_tooth = tooth_boundary_ring & bone_clean
 
     if not cej_on_tooth.any():
         return (
@@ -408,6 +420,14 @@ def per_tooth_landmarks_via_masks(
     positions["bone_mesial"] = bone_mesial
     positions["bone_distal"] = bone_distal
 
+    # v0.7 experiment (reverted): PCA long-axis projection was tried
+    # and rejected. On the 200-image DenPAR Testing benchmark it moved
+    # MAE 0.705 → 0.714 (worse by 0.009 mm). DenPAR PAs are mostly
+    # upright so PCA-axis ≈ y-axis, and the residual axis-correction
+    # pushed over-predictions on healthy cases further over without
+    # meaningfully helping the severe-case under-predictions. Vertical
+    # projection (y-difference) is the right baseline; PCA would only
+    # help on a corpus with significant per-tooth tilt (e.g., BWs).
     def _site(
         cej_pt: tuple[float, float], bone_pt: Optional[tuple[float, float]]
     ) -> BoneLossSite:
