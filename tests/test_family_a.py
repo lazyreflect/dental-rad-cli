@@ -250,7 +250,9 @@ def test_landmarks_via_masks_mandibular_orientation() -> None:
         tooth, cej_band, bone, px_per_mm=10.0,
     )
     assert mesial.mm_estimate is not None
-    assert 3.5 < mesial.mm_estimate < 4.5  # ~40 px / 10 = 4 mm
+    # CEJ at band-center y=107.5 (median of band 100-115), bone at y=140
+    # → 32.5 px / 10 = 3.25 mm
+    assert 3.0 < mesial.mm_estimate < 3.5
     assert pos["cej_mesial"][0] == 100.0  # leftmost CEJ-on-tooth = mesial edge
     assert pos["cej_distal"][0] == 199.0
     # Bone landmarks are inside the tooth + apical to CEJ.
@@ -269,7 +271,9 @@ def test_landmarks_via_masks_maxillary_orientation() -> None:
     assert mesial.mm_estimate is not None
     # Inverted orientation handled: bone_y < cej_y, abs distance still positive.
     assert pos["bone_mesial"][1] < pos["cej_mesial"][1]  # bone above CEJ
-    assert 4.5 < mesial.mm_estimate < 5.5  # ~51 px / 10 = 5.1 mm
+    # CEJ at band-center y=297.5 (median of band 290-305), bone at y=239
+    # → 58.5 px / 10 = 5.85 mm
+    assert 5.5 < mesial.mm_estimate < 6.0
 
 
 def test_landmarks_via_masks_no_cej_overlap_returns_none() -> None:

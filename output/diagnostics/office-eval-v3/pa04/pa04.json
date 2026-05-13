@@ -153,7 +153,7 @@
       "keypoints": {
         "cej_mesial": [
           743.0,
-          529.0,
+          549.0,
           0.7572345733642578
         ],
         "cej_distal": [
@@ -175,7 +175,7 @@
       "bone_loss": {
         "mesial": {
           "tier": "mild",
-          "mm_estimate": 2.93
+          "mm_estimate": 3.56
         },
         "distal": {
           "tier": "mild",
@@ -199,7 +199,7 @@
       "keypoints": {
         "cej_mesial": [
           743.0,
-          529.0,
+          549.0,
           0.7572345733642578
         ],
         "cej_distal": [
@@ -221,7 +221,7 @@
       "bone_loss": {
         "mesial": {
           "tier": "mild",
-          "mm_estimate": 2.93
+          "mm_estimate": 3.56
         },
         "distal": {
           "tier": "mild",
@@ -296,7 +296,7 @@
       "segmentation_cej": "segmentation_cej",
       "caries": "caries"
     },
-    "runtime_seconds": 0.735,
+    "runtime_seconds": 0.743,
     "device": "mps",
     "schema_version": "0.1",
     "dry_run": false

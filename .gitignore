@@ -34,9 +34,12 @@ wheels/
 .DS_Store
 Thumbs.db
 
-# Project-specific: never commit training data, weights, or PHI
-data/                       # DenPAR + Roboflow datasets pulled by download scripts
-weights/                    # trained model checkpoints
+# Project-specific: never commit training data, weights, or PHI.
+# (Inline `#` comments after the pattern silently break gitignore
+# matching in this git version — see commit 18fa849 incident — keep
+# comments on their own lines.)
+data/
+weights/
 *.pt
 *.pth
 *.onnx

@@ -270,11 +270,22 @@ def per_tooth_landmarks_via_masks(
             None,
         )
 
+    # CEJ landmark = leftmost/rightmost column of cej_on_tooth, at the
+    # column's MEDIAN y. Picking the topmost pixel (np.argmin on the
+    # flat (y, x) array) systematically biased the landmark to the
+    # coronal edge of a 30-px-wide CEJ band → ~15 px (~0.9 mm) too high.
+    # The clinically meaningful CEJ point is at the band's centerline.
     ys_cej, xs_cej = np.where(cej_on_tooth)
-    mesial_idx = int(np.argmin(xs_cej))
-    distal_idx = int(np.argmax(xs_cej))
-    cej_mesial = (float(xs_cej[mesial_idx]), float(ys_cej[mesial_idx]))
-    cej_distal = (float(xs_cej[distal_idx]), float(ys_cej[distal_idx]))
+    min_x_cej = int(xs_cej.min())
+    max_x_cej = int(xs_cej.max())
+    cej_mesial = (
+        float(min_x_cej),
+        float(np.median(ys_cej[xs_cej == min_x_cej])),
+    )
+    cej_distal = (
+        float(max_x_cej),
+        float(np.median(ys_cej[xs_cej == max_x_cej])),
+    )
 
     # Orientation: compare CEJ centroid y to tooth centroid y.
     # CEJ is typically near the cervical region — close to the crown.

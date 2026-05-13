@@ -44,12 +44,12 @@
       "keypoints": {
         "cej_mesial": [
           347.0,
-          107.0,
+          119.5,
           0.844269871711731
         ],
         "cej_distal": [
           377.0,
-          136.0,
+          139.0,
           0.844269871711731
         ]
       },
@@ -78,7 +78,7 @@
       "keypoints": {
         "cej_mesial": [
           516.0,
-          628.0,
+          640.0,
           0.844269871711731
         ],
         "cej_distal": [
@@ -94,7 +94,8 @@
       },
       "bone_loss": {
         "mesial": {
-          "mm_estimate": 1.44
+          "tier": "mild",
+          "mm_estimate": 2.16
         },
         "distal": {
           "reason": "no_bone_at_site"
@@ -117,12 +118,12 @@
       "keypoints": {
         "cej_mesial": [
           404.0,
-          125.0,
+          132.5,
           0.844269871711731
         ],
         "cej_distal": [
           591.0,
-          142.0,
+          144.0,
           0.844269871711731
         ]
       },
@@ -163,7 +164,7 @@
       "keypoints": {
         "cej_mesial": [
           594.0,
-          631.0,
+          631.5,
           0.844269871711731
         ],
         "cej_distal": [
@@ -209,12 +210,12 @@
       "keypoints": {
         "cej_mesial": [
           636.0,
-          139.0,
+          142.0,
           0.844269871711731
         ],
         "cej_distal": [
           850.0,
-          130.0,
+          142.5,
           0.844269871711731
         ]
       },
@@ -243,12 +244,12 @@
       "keypoints": {
         "cej_mesial": [
           861.0,
-          153.0,
+          154.0,
           0.844269871711731
         ],
         "cej_distal": [
           889.0,
-          130.0,
+          138.0,
           0.844269871711731
         ]
       },
@@ -376,7 +377,7 @@
       "segmentation_cej": "segmentation_cej",
       "caries": "caries"
     },
-    "runtime_seconds": 0.769,
+    "runtime_seconds": 0.834,
     "device": "mps",
     "schema_version": "0.1",
     "dry_run": false
