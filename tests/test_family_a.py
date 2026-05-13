@@ -247,7 +247,7 @@ def test_landmarks_via_masks_mandibular_orientation() -> None:
     cej_band = _rect_mask(shape, 0, 100, 400, 116)
     bone = _rect_mask(shape, 0, 140, 400, 400)
     mesial, distal, pos = per_tooth_landmarks_via_masks(
-        tooth, cej_band, bone, px_per_mm=10.0,
+        tooth, cej_band, bone, px_per_mm=10.0, bone_erosion_px=0,
     )
     assert mesial.mm_estimate is not None
     # CEJ at band-center y=107.5 (median of band 100-115), bone at y=140
@@ -266,7 +266,7 @@ def test_landmarks_via_masks_maxillary_orientation() -> None:
     cej_band = _rect_mask(shape, 0, 290, 400, 306)
     bone = _rect_mask(shape, 0, 0, 400, 240)
     mesial, distal, pos = per_tooth_landmarks_via_masks(
-        tooth, cej_band, bone, px_per_mm=10.0,
+        tooth, cej_band, bone, px_per_mm=10.0, bone_erosion_px=0,
     )
     assert mesial.mm_estimate is not None
     # Inverted orientation handled: bone_y < cej_y, abs distance still positive.
@@ -282,7 +282,7 @@ def test_landmarks_via_masks_no_cej_overlap_returns_none() -> None:
     cej_band = _rect_mask(shape, 0, 350, 400, 360)  # CEJ band below tooth
     bone = _rect_mask(shape, 0, 200, 400, 400)
     mesial, distal, pos = per_tooth_landmarks_via_masks(
-        tooth, cej_band, bone, px_per_mm=10.0,
+        tooth, cej_band, bone, px_per_mm=10.0, bone_erosion_px=0,
     )
     assert pos is None
     assert mesial.reason == "no_cej_at_site"
@@ -294,7 +294,7 @@ def test_landmarks_via_masks_no_bone_overlap_returns_reason() -> None:
     cej_band = _rect_mask(shape, 0, 100, 400, 116)
     bone = _rect_mask(shape, 250, 0, 400, 400)  # bone away from tooth
     mesial, distal, pos = per_tooth_landmarks_via_masks(
-        tooth, cej_band, bone, px_per_mm=10.0,
+        tooth, cej_band, bone, px_per_mm=10.0, bone_erosion_px=0,
     )
     assert pos is not None
     assert pos["cej_mesial"] is not None

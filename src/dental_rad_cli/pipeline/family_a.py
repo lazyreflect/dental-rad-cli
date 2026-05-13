@@ -203,11 +203,46 @@ def per_tooth_family_a(
     return mesial, distal
 
 
+# v0.6: bone-mask morphological erosion before computing the
+# bone-on-tooth intersection. The bone polyline-based segmentation
+# produces a band with fluffy edges (false-positive bone pixels
+# along the most-coronal contour). Without cleanup, the "most coronal
+# bone-on-tooth pixel" picks one of these noise pixels, landing the
+# bone-crest landmark systematically CORONAL to the true bone level
+# → under-prediction of mm CEJ→bone-crest distance.
+#
+# 5-px erosion removes ~5 px of bone-mask edge (the noise layer) while
+# preserving the bone body (the bone band is buffered to ±15 px =
+# 30 px total). The erosion radius can be tuned via the kwarg.
+#
+# Diagnostic motivation (benchmark eval 200-image baseline at cd10510):
+# GT > 5 mm sites: mean err 1.164 mm (severe under-prediction)
+# GT < 2 mm sites: mean err 0.570 mm
+# After erosion expected: severe-case mean err drops ~30-50%.
+_BONE_EROSION_PX_DEFAULT: int = 5
+
+
+def _erode_mask(mask: np.ndarray, px: int) -> np.ndarray:
+    """Morphological erosion by ``px`` pixels (cross-shaped kernel).
+
+    Operates on a bool mask; returns bool mask of same shape. ``px=0``
+    is a no-op.
+    """
+    if px <= 0:
+        return mask
+    import cv2
+    k = max(1, 2 * px + 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (k, k))
+    eroded = cv2.erode(mask.astype(np.uint8), kernel, iterations=1)
+    return eroded.astype(bool)
+
+
 def per_tooth_landmarks_via_masks(
     tooth_mask: np.ndarray,
     cej_band: np.ndarray,
     bone_mask: np.ndarray,
     px_per_mm: float,
+    bone_erosion_px: int = _BONE_EROSION_PX_DEFAULT,
 ) -> tuple[
     BoneLossSite,
     BoneLossSite,
@@ -255,7 +290,11 @@ def per_tooth_landmarks_via_masks(
     if no CEJ pixels overlap the tooth mask (no landmark possible).
     """
     cej_on_tooth = tooth_mask & cej_band
-    bone_on_tooth = tooth_mask & bone_mask
+    # v0.6: erode bone mask to kill fluffy false-positive coronal-edge
+    # pixels that were systematically biasing the bone-crest landmark
+    # coronal (closer to CEJ → under-prediction of severe-case mm).
+    bone_clean = _erode_mask(bone_mask, bone_erosion_px) if bone_erosion_px > 0 else bone_mask
+    bone_on_tooth = tooth_mask & bone_clean
 
     if not cej_on_tooth.any():
         return (
