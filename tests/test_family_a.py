@@ -314,3 +314,133 @@ def test_landmarks_via_masks_implausible_distance_rejected() -> None:
     )
     assert mesial.mm_estimate is None
     assert mesial.reason == "implausible_mm"
+
+
+# ---------------------------------------------------------------------------
+# landmark_rule parameterization (BRneg-2 / 2026-05-12)
+# ---------------------------------------------------------------------------
+
+
+def _setup_bimodal_bone_case(shape=(400, 400)):
+    """Construct a fixture where bone-on-tooth-ring has both a shallow
+    cluster (just below CEJ) and a deep cluster (further apical).
+    Simulates the 907-style wide bone-mask distribution where different
+    rules give noticeably different bone-y landmarks."""
+    tooth = _rect_mask(shape, 100, 50, 200, 350)
+    cej_band = _rect_mask(shape, 0, 90, 400, 106)
+    bone = np.zeros(shape, dtype=bool)
+    # Shallow cluster (just below CEJ).
+    bone[115:130, 0:400] = True
+    # Deep cluster (much further apical).
+    bone[260:280, 0:400] = True
+    return tooth, cej_band, bone
+
+
+def test_landmark_rule_min_y_half_picks_shallow_on_bimodal() -> None:
+    tooth, cej_band, bone = _setup_bimodal_bone_case()
+    mesial, _, pos = per_tooth_landmarks_via_masks(
+        tooth, cej_band, bone, px_per_mm=10.0, bone_erosion_px=0,
+        landmark_rule="min_y_half",
+    )
+    # min_y picks the SHALLOW cluster → small mm.
+    assert mesial.mm_estimate is not None
+    assert mesial.mm_estimate < 2.5  # ~1.5 mm range (15 px / 10)
+
+
+def test_landmark_rule_max_y_half_picks_deep_on_bimodal() -> None:
+    tooth, cej_band, bone = _setup_bimodal_bone_case()
+    mesial, _, pos = per_tooth_landmarks_via_masks(
+        tooth, cej_band, bone, px_per_mm=10.0, bone_erosion_px=0,
+        landmark_rule="max_y_half",
+    )
+    # max_y picks the DEEP cluster → large mm.
+    assert mesial.mm_estimate is not None
+    assert mesial.mm_estimate > 15.0  # ~17 mm or more
+
+
+def test_landmark_rule_median_y_half_differs_from_min() -> None:
+    tooth, cej_band, bone = _setup_bimodal_bone_case()
+    mesial_min, _, _ = per_tooth_landmarks_via_masks(
+        tooth, cej_band, bone, px_per_mm=10.0, bone_erosion_px=0,
+        landmark_rule="min_y_half",
+    )
+    mesial_median, _, _ = per_tooth_landmarks_via_masks(
+        tooth, cej_band, bone, px_per_mm=10.0, bone_erosion_px=0,
+        landmark_rule="median_y_half",
+    )
+    # median follows the larger cluster; on bimodal distributions it
+    # gives a meaningfully different y than min. Whether shallow or
+    # deep depends on which cluster is bigger.
+    assert mesial_min.mm_estimate is not None
+    assert mesial_median.mm_estimate is not None
+    assert abs(mesial_median.mm_estimate - mesial_min.mm_estimate) > 1.0
+
+
+def test_landmark_rule_wide_aware_uses_median_when_spread_large() -> None:
+    tooth, cej_band, bone = _setup_bimodal_bone_case()
+    # Spread y-range ≈ 260 - 115 = 145 px >> 50 → wide → median.
+    mesial_wide, _, _ = per_tooth_landmarks_via_masks(
+        tooth, cej_band, bone, px_per_mm=10.0, bone_erosion_px=0,
+        landmark_rule="wide_aware",
+    )
+    mesial_median, _, _ = per_tooth_landmarks_via_masks(
+        tooth, cej_band, bone, px_per_mm=10.0, bone_erosion_px=0,
+        landmark_rule="median_y_half",
+    )
+    # Wide-aware fell into the median branch → matches median rule.
+    assert mesial_wide.mm_estimate is not None
+    assert mesial_median.mm_estimate is not None
+    assert abs(mesial_wide.mm_estimate - mesial_median.mm_estimate) < 0.5
+
+
+def test_landmark_rule_wide_aware_uses_min_when_spread_narrow() -> None:
+    # Thin bone band → narrow spread → wide_aware uses min_y_half.
+    shape = (400, 400)
+    tooth = _rect_mask(shape, 100, 50, 200, 350)
+    cej_band = _rect_mask(shape, 0, 90, 400, 106)
+    bone = _rect_mask(shape, 0, 115, 400, 125)  # thin band, ~10px spread
+    mesial_wide, _, _ = per_tooth_landmarks_via_masks(
+        tooth, cej_band, bone, px_per_mm=10.0, bone_erosion_px=0,
+        landmark_rule="wide_aware",
+    )
+    mesial_min, _, _ = per_tooth_landmarks_via_masks(
+        tooth, cej_band, bone, px_per_mm=10.0, bone_erosion_px=0,
+        landmark_rule="min_y_half",
+    )
+    # Narrow spread → wide_aware falls into the min branch.
+    assert mesial_wide.mm_estimate is not None
+    assert mesial_min.mm_estimate is not None
+    assert abs(mesial_wide.mm_estimate - mesial_min.mm_estimate) < 0.1
+
+
+def test_landmark_rule_unknown_raises() -> None:
+    tooth, cej_band, bone = _setup_bimodal_bone_case()
+    try:
+        per_tooth_landmarks_via_masks(
+            tooth, cej_band, bone, px_per_mm=10.0,
+            landmark_rule="nonsense_rule",
+        )
+    except ValueError as e:
+        assert "unknown landmark_rule" in str(e)
+    else:
+        raise AssertionError("expected ValueError for unknown landmark_rule")
+
+
+def test_landmark_rule_env_var_fallback() -> None:
+    """When landmark_rule=None, falls back to DENTAL_RAD_LANDMARK_RULE env var."""
+    import os
+    tooth, cej_band, bone = _setup_bimodal_bone_case()
+    prev = os.environ.get("DENTAL_RAD_LANDMARK_RULE")
+    try:
+        os.environ["DENTAL_RAD_LANDMARK_RULE"] = "max_y_half"
+        mesial, _, _ = per_tooth_landmarks_via_masks(
+            tooth, cej_band, bone, px_per_mm=10.0, bone_erosion_px=0,
+        )
+        # Should pick deep cluster via max_y_half from env.
+        assert mesial.mm_estimate is not None
+        assert mesial.mm_estimate > 15.0
+    finally:
+        if prev is None:
+            os.environ.pop("DENTAL_RAD_LANDMARK_RULE", None)
+        else:
+            os.environ["DENTAL_RAD_LANDMARK_RULE"] = prev
